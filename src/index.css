@@ -1,0 +1,125 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400..800;1,400..800&family=JetBrains+Mono:ital,wght@0,400..700;1,400..700&display=swap');
+@import "tailwindcss";
+
+@theme {
+
+  --color-primary: #6F2C8F;
+  --color-primary-50: #FAF5FC;
+  --color-primary-100: #F3E8F9;
+  --color-primary-200: #E8D2F3;
+  --color-primary-300: #D8B2EA;
+  --color-primary-400: #BE83DC;
+  --color-primary-500: #9B4FC2;
+  --color-primary-600: #6F2C8F;
+  --color-primary-700: #5B2476;
+  --color-primary-800: #4B1E61;
+  --color-primary-900: #3F1A51;
+  --color-primary-950: #260B34;
+
+  /* Map indigo to the brand primary #6F2C8F scale for seamless enterprise theme integration */
+  --color-indigo-50: #FAF5FC;
+  --color-indigo-100: #F3E8F9;
+  --color-indigo-200: #E8D2F3;
+  --color-indigo-300: #D8B2EA;
+  --color-indigo-400: #BE83DC;
+  --color-indigo-500: #9B4FC2;
+  --color-indigo-600: #6F2C8F;
+  --color-indigo-700: #5B2476;
+  --color-indigo-800: #4B1E61;
+  --color-indigo-900: #3F1A51;
+  --color-indigo-950: #260B34;
+
+  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    font-size: 14.5px; /* Compact ERP scaling matching 90% zoom density at 100% zoom */
+    letter-spacing: -0.01em;
+  }
+
+  body {
+    background-color: #f8fafc;
+    color: #0f172a;
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+    margin: 0;
+    padding: 0;
+    min-height: 100vh;
+    font-size: 1rem;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Compact form controls & data tables */
+  label {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: #334155;
+  }
+
+  input,
+  select,
+  textarea,
+  button {
+    font-family: inherit;
+    font-size: 0.875rem;
+  }
+
+  table {
+    font-size: 0.84rem;
+  }
+
+  th {
+    font-size: 0.75rem;
+    letter-spacing: 0.03em;
+    font-weight: 700;
+  }
+
+  td {
+    font-size: 0.8125rem;
+  }
+
+  code,
+  kbd,
+  samp,
+  pre {
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+
+  #root {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    text-align: left;
+    border-inline: none;
+  }
+}
+
+/* Custom scrollbars for enterprise data tables */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
