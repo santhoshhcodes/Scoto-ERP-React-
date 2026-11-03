@@ -12,13 +12,15 @@ import {
 } from 'lucide-react';
 import { useQuotations, useUpdateQuotationApproval } from '../../../api/transactionApi';
 import { useSortableData, SortableHeader } from '../../../utils/sortUtils';
+import { useFinancialYear } from '../../../context/FinancialYearContext';
 
 export const QuotationApprovalPage = () => {
+  const { selectedFinYear } = useFinancialYear();
   const [statusFilter, setStatusFilter] = useState('0'); // '0' (Pending) | '1' (Approved)
   const [searchQuery, setSearchQuery] = useState('');
   const [notification, setNotification] = useState(null);
 
-  const { data: quotationRes, isLoading, isFetching, error: fetchError, refetch } = useQuotations({ search: searchQuery });
+  const { data: quotationRes, isLoading, isFetching, error: fetchError, refetch } = useQuotations({ search: searchQuery, finYear: selectedFinYear });
   const updateApprovalMutation = useUpdateQuotationApproval();
 
   const allQuotations = quotationRes?.data ?? [];

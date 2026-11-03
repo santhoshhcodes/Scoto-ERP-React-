@@ -8,16 +8,35 @@ import {
   LogOut,
   ChevronDown,
   Building2,
+  Calendar,
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useBackendHealth } from '../../api/attendanceApi';
+import { useFinancialYear } from '../../context/FinancialYearContext';
 import scotoLogo from '../../assets/Scoto.png';
 
 export const Header = ({ onToggleSidebar, onMenuClick, isSidebarOpen }) => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const { selectedFinYear, setSelectedFinYear, availableYears } = useFinancialYear();
   const { refetch: refetchHealth, isFetching: isHealthFetching } = useBackendHealth();
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [syncSuccessToast, setSyncSuccessToast] = useState(false);
+
+  // Check if current page is in office expense module (which uses natural date ranges, not FY)
+  const isOfficeExpensePage =
+    location.pathname.toLowerCase().includes('office-expen') ||
+
+    location.pathname.toLowerCase().includes('expense-management') ||
+
+    location.pathname.toLowerCase().includes('/travel-expense');
+
+  // Check if current page is in transaction module or transaction-related reports
+  const isTransactionPage =
+    (location.pathname.startsWith('/transaction') ||
+      location.pathname.startsWith('/reports') ||
+      location.pathname === '/tally-upload') &&
+    !isOfficeExpensePage;
 
   let currentUser = {
     name: 'Admin',
@@ -111,32 +130,50 @@ export const Header = ({ onToggleSidebar, onMenuClick, isSidebarOpen }) => {
       {/* Right side: Sync Status, Notifications & User Profile Controls */}
       <div className="flex items-center gap-2.5 sm:gap-3">
         {/* Sync Success Floating feedback */}
-        {syncSuccessToast && (
+        {!isTransactionPage && syncSuccessToast && (
           <div className="hidden md:flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 border border-emerald-200 animate-in fade-in slide-in-from-top-2">
             <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
             <span>Biometric Services Synchronized</span>
           </div>
         )}
 
-        {/* Sync Action Button */}
-        <button
-          onClick={handleSyncClick}
-          disabled={isHealthFetching}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 shadow-2xs hover:bg-indigo-100 hover:border-indigo-300 transition-all disabled:opacity-60 cursor-pointer"
-          title="Synchronize real-time biometric and ERP data"
-        >
-          <RefreshCw
-            className={`h-3.5 w-3.5 ${
-              isHealthFetching ? 'animate-spin text-indigo-600' : ''
-            }`}
-          />
-          <span className="hidden sm:inline">
-            {isHealthFetching ? 'Synchronizing...' : 'Sync Status'}
-          </span>
-          <span className="sm:hidden">Sync</span>
-        </button>
+        {/* Conditional Header Control: Financial Year Selector on Transaction Pages, Sync Status on Other Pages */}
+        {isTransactionPage ? (
+          <div className="flex items-center gap-1.5 bg-slate-100/90 rounded-lg p-1 border border-slate-200 shadow-2xs">
+            <Calendar className="w-4 h-4 text-slate-500 ml-1.5 sm:ml-2" />
+            <span className="text-xs font-semibold text-slate-600">FY:</span>
+            <select
+              value={selectedFinYear}
+              onChange={(e) => setSelectedFinYear(e.target.value)}
+              className="bg-transparent text-xs font-bold text-slate-800 pr-2 sm:pr-3 py-1 outline-none cursor-pointer"
+              title="Select Financial Year"
+            >
+              {availableYears.map((yr) => (
+                <option key={yr} value={yr}>
+                  {yr === 'ALL' ? 'All Financial Years' : `FY ${yr}`}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : (
+          <button
+            onClick={handleSyncClick}
+            disabled={isHealthFetching}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 shadow-2xs hover:bg-indigo-100 hover:border-indigo-300 transition-all disabled:opacity-60 cursor-pointer"
+            title="Synchronize real-time biometric and ERP data"
+          >
+            <RefreshCw
+              className={`h-3.5 w-3.5 ${isHealthFetching ? 'animate-spin text-indigo-600' : ''
+                }`}
+            />
+            <span className="hidden sm:inline">
+              {isHealthFetching ? 'Synchronizing...' : 'Sync Status'}
+            </span>
+            <span className="sm:hidden">Sync</span>
+          </button>
+        )}
 
-     
+
 
         {/* User Profile Controls Menu */}
         <div className="relative pl-1 border-l border-slate-200">

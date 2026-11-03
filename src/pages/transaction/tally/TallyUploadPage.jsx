@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { StatCard } from '../../../components/common';
 import { exportToExcel } from '../../../utils/excelUtils';
+import { useFinancialYear } from '../../../context/FinancialYearContext';
 import scotoLogo from '../../../assets/ScotoLogo.png';
 import {
   useTallyTransactions,
@@ -32,6 +33,7 @@ import {
 } from '../../../api/tallyApi';
 
 export const TallyUploadPage = () => {
+  const { selectedFinYear } = useFinancialYear();
   // Target Company & Location Settings (Matches .NET defaults: SCT / UNIT I)
   const [cCode, setCCode] = useState('SCT');
   const [lCode, setLCode] = useState('UNIT I');
@@ -71,6 +73,7 @@ export const TallyUploadPage = () => {
     voucher_type: voucherTypeFilter,
     from_date: fromDate,
     to_date: toDate,
+    fin_year: selectedFinYear,
   });
 
   const previewMutation = usePreviewTallyExcel();

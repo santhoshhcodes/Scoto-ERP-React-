@@ -34,6 +34,7 @@ import { useMasterItems, useMasterLedgers } from '../../../api/masterApi';
 import { useSortableData, SortableHeader } from '../../../utils/sortUtils';
 import { DocumentActionDropdown } from '../../../components/common/DocumentActionDropdown';
 import { DocumentPrintModal } from '../../../components/common/DocumentPrintModal';
+import { useFinancialYear } from '../../../context/FinancialYearContext';
 
 const GST_RATES = [0, 5, 12, 18, 28];
 const UOM_OPTIONS = ['Pcs', 'No', 'Roll', 'Set', 'Mtr', 'Box', 'Unit', 'Kg'];
@@ -60,6 +61,7 @@ const INITIAL_ITEM_ROW = {
 };
 
 export const QuotationPage = () => {
+  const { selectedFinYear } = useFinancialYear();
   const [viewMode, setViewMode] = useState('list'); // 'list' | 'form'
   const [editingTransNo, setEditingTransNo] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -72,7 +74,7 @@ export const QuotationPage = () => {
     isFetching,
     error: fetchError,
     refetch,
-  } = useQuotations({ search: searchQuery });
+  } = useQuotations({ search: searchQuery, finYear: selectedFinYear });
 
   const { data: masterItemsRes } = useMasterItems();
   const { data: masterLedgersRes } = useMasterLedgers();

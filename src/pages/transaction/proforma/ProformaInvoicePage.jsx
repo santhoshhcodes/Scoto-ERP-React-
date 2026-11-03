@@ -30,8 +30,10 @@ import {
 import { useSortableData, SortableHeader } from '../../../utils/sortUtils';
 import { DocumentActionDropdown } from '../../../components/common/DocumentActionDropdown';
 import { DocumentPrintModal } from '../../../components/common/DocumentPrintModal';
+import { useFinancialYear } from '../../../context/FinancialYearContext';
 
 export const ProformaInvoicePage = () => {
+  const { selectedFinYear } = useFinancialYear();
   const [viewMode, setViewMode] = useState('list'); // 'list' | 'form'
   const [editingTransNo, setEditingTransNo] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -44,9 +46,9 @@ export const ProformaInvoicePage = () => {
     isFetching,
     error: fetchError,
     refetch,
-  } = useProformaInvoices({ search: searchQuery });
+  } = useProformaInvoices({ search: searchQuery, finYear: selectedFinYear });
 
-  const { data: quotationRes } = useQuotations();
+  const { data: quotationRes } = useQuotations({ finYear: selectedFinYear });
   const { data: masterItemsRes } = useMasterItems();
   const { data: masterLedgersRes } = useMasterLedgers();
 

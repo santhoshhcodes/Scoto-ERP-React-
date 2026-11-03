@@ -34,6 +34,7 @@ import { useMasterItems, useMasterLedgers } from '../../../api/masterApi';
 import { useSortableData, SortableHeader } from '../../../utils/sortUtils';
 import { DocumentActionDropdown } from '../../../components/common/DocumentActionDropdown';
 import { DocumentPrintModal } from '../../../components/common/DocumentPrintModal';
+import { useFinancialYear } from '../../../context/FinancialYearContext';
 
 const GST_RATES = [0, 5, 12, 18, 28];
 
@@ -59,6 +60,7 @@ const INITIAL_SERIAL_ROW = {
 };
 
 export const SalesInvoicePage = () => {
+  const { selectedFinYear } = useFinancialYear();
   const [viewMode, setViewMode] = useState('list'); // 'list' | 'form'
   const [editingTransNo, setEditingTransNo] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -71,7 +73,7 @@ export const SalesInvoicePage = () => {
     isFetching,
     error: fetchError,
     refetch,
-  } = useSalesInvoices({ search: searchQuery });
+  } = useSalesInvoices({ search: searchQuery, finYear: selectedFinYear });
 
   const { data: masterItemsRes } = useMasterItems();
   const { data: masterLedgersRes } = useMasterLedgers();

@@ -39,12 +39,14 @@ export const tallyApi = {
     voucher_type = '',
     from_date = '',
     to_date = '',
+    fin_year = '',
   } = {}) => {
     const params = { limit, skip };
     if (search && search.trim()) params.search = search.trim();
     if (voucher_type && voucher_type !== 'ALL') params.voucher_type = voucher_type.trim();
     if (from_date && from_date.trim()) params.from_date = from_date.trim();
     if (to_date && to_date.trim()) params.to_date = to_date.trim();
+    if (fin_year && fin_year !== 'ALL') params.fin_year = fin_year.trim();
 
     return await apiClient.get(API_ENDPOINTS.TALLY.TRANSACTIONS, { params });
   },
@@ -78,11 +80,12 @@ export const useTallyTransactions = ({
   voucher_type = '',
   from_date = '',
   to_date = '',
+  fin_year = '',
   enabled = true,
 } = {}) => {
   return useQuery({
-    queryKey: ['tally-transactions', { limit, skip, search, voucher_type, from_date, to_date }],
-    queryFn: () => tallyApi.getTransactions({ limit, skip, search, voucher_type, from_date, to_date }),
+    queryKey: ['tally-transactions', { limit, skip, search, voucher_type, from_date, to_date, fin_year }],
+    queryFn: () => tallyApi.getTransactions({ limit, skip, search, voucher_type, from_date, to_date, fin_year }),
     enabled,
     staleTime: 1000 * 60, // 1 minute
   });

@@ -24,8 +24,10 @@ import {
   useDeleteDeliveryChallan,
 } from '../../../api/transactionApi';
 import { useSortableData, SortableHeader } from '../../../utils/sortUtils';
+import { useFinancialYear } from '../../../context/FinancialYearContext';
 
 export const DeliveryChallanPage = () => {
+  const { selectedFinYear } = useFinancialYear();
   const [viewMode, setViewMode] = useState('list');
   const [editingDeliveryNo, setEditingDeliveryNo] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -37,7 +39,7 @@ export const DeliveryChallanPage = () => {
     isFetching,
     error: fetchError,
     refetch,
-  } = useDeliveryChallans({ search: searchQuery });
+  } = useDeliveryChallans({ search: searchQuery, finYear: selectedFinYear });
 
   const { data: masterItemsRes } = useMasterItems();
   const { data: masterLedgersRes } = useMasterLedgers();

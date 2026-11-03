@@ -35,13 +35,14 @@ import {
   useCustomerDossier,
 } from '../../../api/customerReportApi';
 import { exportToExcel } from '../../../utils/excelUtils';
+import { useFinancialYear } from '../../../context/FinancialYearContext';
 
 export const CustomerReportPage = () => {
   // Search & Filter State
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedClient, setSelectedClient] = useState(null); // { LedgerCode, LedgerName, ... }
   const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const [selectedFinYear, setSelectedFinYear] = useState('ALL');
+  const { selectedFinYear, setSelectedFinYear, availableYears } = useFinancialYear();
   const [activeTab, setActiveTab] = useState('milestones'); // 'milestones' | 'timeline' | 'ledger' | 'raw_docs'
   const [rawDocSubTab, setRawDocSubTab] = useState('invoices'); // 'quotes' | 'proformas' | 'invoices' | 'tally'
 
@@ -49,18 +50,10 @@ export const CustomerReportPage = () => {
 
   // Queries
   const { data: clientsRes, isLoading: isLoadingClients } = useCustomerClients(searchTerm);
-  const { data: finYearsRes } = useReportFinancialYears();
 
   const clientList = useMemo(() => {
     return clientsRes?.data?.data || clientsRes?.data || [];
   }, [clientsRes]);
-
-  const availableYears = useMemo(() => {
-    const fetched = finYearsRes?.data?.data || finYearsRes?.data || [];
-    const base = ['ALL', '2026-2027', '2025_2026', '2024_2025'];
-    const merged = Array.from(new Set([...base, ...fetched]));
-    return merged;
-  }, [finYearsRes]);
 
   // Dossier Query for selected client
   const {

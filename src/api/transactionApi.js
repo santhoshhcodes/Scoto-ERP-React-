@@ -10,7 +10,7 @@ export const transactionApi = {
   // ==========================================
   // Quotation Module APIs
   // ==========================================
-  getQuotations: async ({ search = '', status } = {}) => {
+  getQuotations: async ({ search = '', status, finYear } = {}) => {
     const params = {};
     if (search && search.trim()) params.search = search.trim();
     if (status && status !== 'ALL') params.status = status;
@@ -67,7 +67,7 @@ export const transactionApi = {
   // ==========================================
   // Proforma Invoice Module APIs
   // ==========================================
-  getProformaInvoices: async ({ search = '', status } = {}) => {
+  getProformaInvoices: async ({ search = '', status, finYear } = {}) => {
     const params = {};
     if (search && search.trim()) params.search = search.trim();
     if (status && status !== 'ALL') params.status = status;
@@ -124,7 +124,7 @@ export const transactionApi = {
   // ==========================================
   // Delivery Challan Module APIs
   // ==========================================
-  getDeliveryChallans: async ({ search = '', returnType } = {}) => {
+  getDeliveryChallans: async ({ search = '', returnType, finYear } = {}) => {
     const params = {};
     if (search && search.trim()) params.search = search.trim();
     if (returnType && returnType !== 'ALL') params.return_type = returnType;
@@ -150,7 +150,7 @@ export const transactionApi = {
   // ==========================================
   // Sales Invoice Module APIs
   // ==========================================
-  getSalesInvoices: async ({ search = '', status } = {}) => {
+  getSalesInvoices: async ({ search = '', status, finYear } = {}) => {
     const params = {};
     if (search && search.trim()) params.search = search.trim();
     if (status && status !== 'ALL') params.status = status;
@@ -279,10 +279,10 @@ export const transactionApi = {
 // ==========================================
 
 // Quotations
-export const useQuotations = ({ search = '', status, enabled = true } = {}) => {
+export const useQuotations = ({ search = '', status, finYear, enabled = true } = {}) => {
   return useQuery({
-    queryKey: ['transaction', 'quotations', { search, status }],
-    queryFn: () => transactionApi.getQuotations({ search, status }),
+    queryKey: ['transaction', 'quotations', { search, status, finYear }],
+    queryFn: () => transactionApi.getQuotations({ search, status, finYear }),
     enabled,
     staleTime: 10000,
   });
@@ -336,10 +336,10 @@ export const useDownloadQuotationExcel = () => {
 };
 
 // Proforma Invoices
-export const useProformaInvoices = ({ search = '', status, enabled = true } = {}) => {
+export const useProformaInvoices = ({ search = '', status, finYear, enabled = true } = {}) => {
   return useQuery({
-    queryKey: ['transaction', 'proforma-invoices', { search, status }],
-    queryFn: () => transactionApi.getProformaInvoices({ search, status }),
+    queryKey: ['transaction', 'proforma-invoices', { search, status, finYear }],
+    queryFn: () => transactionApi.getProformaInvoices({ search, status, finYear }),
     enabled,
     staleTime: 10000,
   });
@@ -393,10 +393,10 @@ export const useDownloadProformaInvoiceExcel = () => {
 };
 
 // Delivery Challans
-export const useDeliveryChallans = ({ search = '', returnType, enabled = true } = {}) => {
+export const useDeliveryChallans = ({ search = '', returnType, finYear, enabled = true } = {}) => {
   return useQuery({
-    queryKey: ['transaction', 'delivery-challans', { search, returnType }],
-    queryFn: () => transactionApi.getDeliveryChallans({ search, returnType }),
+    queryKey: ['transaction', 'delivery-challans', { search, returnType, finYear }],
+    queryFn: () => transactionApi.getDeliveryChallans({ search, returnType, finYear }),
     enabled,
     staleTime: 10000,
   });
@@ -427,10 +427,10 @@ export const useDeleteDeliveryChallan = () => {
 };
 
 // Sales Invoices
-export const useSalesInvoices = ({ search = '', status, enabled = true } = {}) => {
+export const useSalesInvoices = ({ search = '', status, finYear, enabled = true } = {}) => {
   return useQuery({
-    queryKey: ['transaction', 'sales-invoices', { search, status }],
-    queryFn: () => transactionApi.getSalesInvoices({ search, status }),
+    queryKey: ['transaction', 'sales-invoices', { search, status, finYear }],
+    queryFn: () => transactionApi.getSalesInvoices({ search, status, finYear }),
     enabled,
     staleTime: 10000,
   });

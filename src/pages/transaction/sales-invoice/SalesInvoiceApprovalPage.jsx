@@ -17,8 +17,10 @@ import {
   transactionApi,
 } from '../../../api/transactionApi';
 import { useSortableData, SortableHeader } from '../../../utils/sortUtils';
+import { useFinancialYear } from '../../../context/FinancialYearContext';
 
 export const SalesInvoiceApprovalPage = () => {
+  const { selectedFinYear } = useFinancialYear();
   const [statusFilter, setStatusFilter] = useState('Pending');
   const [searchQuery, setSearchQuery] = useState('');
   const [notification, setNotification] = useState(null);
@@ -31,7 +33,7 @@ export const SalesInvoiceApprovalPage = () => {
     isFetching,
     error: fetchError,
     refetch,
-  } = useSalesInvoices({ search: searchQuery, status: statusFilter });
+  } = useSalesInvoices({ search: searchQuery, status: statusFilter, finYear: selectedFinYear });
 
   const updateApprovalMutation = useUpdateSalesInvoiceApproval();
 

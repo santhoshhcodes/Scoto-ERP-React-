@@ -14,14 +14,16 @@ import {
   useDownloadProformaInvoiceExcel,
 } from '../../../api/transactionApi';
 import { useSortableData, SortableHeader } from '../../../utils/sortUtils';
+import { useFinancialYear } from '../../../context/FinancialYearContext';
 
 export const ProformaInvoiceApprovalPage = () => {
+  const { selectedFinYear } = useFinancialYear();
   const [statusFilter, setStatusFilter] = useState('Pending');
   const [searchQuery, setSearchQuery] = useState('');
   const [notification, setNotification] = useState(null);
   const [downloadingTransNo, setDownloadingTransNo] = useState(null);
 
-  const { data: proformaRes, isLoading, isFetching, error: fetchError, refetch } = useProformaInvoices({ search: searchQuery });
+  const { data: proformaRes, isLoading, isFetching, error: fetchError, refetch } = useProformaInvoices({ search: searchQuery, finYear: selectedFinYear });
   const updateApprovalMutation = useUpdateProformaApproval();
   const downloadProformaExcelMutation = useDownloadProformaInvoiceExcel();
 
