@@ -22,6 +22,9 @@ import ProformaInvoiceApprovalPage from '../pages/transaction/proforma/ProformaI
 import DeliveryChallanPage from '../pages/transaction/delivery/DeliveryChallanPage';
 import SalesInvoicePage from '../pages/transaction/sales-invoice/SalesInvoicePage';
 import SalesInvoiceApprovalPage from '../pages/transaction/sales-invoice/SalesInvoiceApprovalPage';
+import BulkInvoiceUploadPage from '../pages/transaction/sales-invoice/BulkInvoiceUploadPage';
+import CustomerReceiptsPage from '../pages/transaction/receipt/CustomerReceiptsPage';
+import RecordPaymentPage from '../pages/transaction/receipt/RecordPaymentPage';
 import TallyUploadPage from '../pages/transaction/tally/TallyUploadPage';
 import CustomerReportPage from '../pages/transaction/customer-report/CustomerReportPage';
 import OfficeExpensePage from '../pages/transaction/office-expence/OfficeExpensePage';
@@ -89,7 +92,17 @@ export const AppRoutes = () => {
         {/* Transaction Module - Sales Invoice Tree */}
         <Route path="transaction/sales-invoice" element={<SalesInvoicePage />} />
         <Route path="transaction/sales-invoices" element={<SalesInvoicePage />} />
+        <Route path="transaction/sales-invoices/bulk-upload" element={<BulkInvoiceUploadPage />} />
+        <Route path="transaction/sales-invoice/bulk-upload" element={<BulkInvoiceUploadPage />} />
         <Route path="transaction/sales-invoice-approval" element={<SalesInvoiceApprovalPage />} />
+
+        {/* Transaction Module - Customer Receipts & Advances */}
+        <Route path="transaction/receipts" element={<CustomerReceiptsPage />} />
+        <Route path="transaction/receipts/new" element={<RecordPaymentPage />} />
+        <Route path="transaction/receipt/new" element={<Navigate to="/transaction/receipts/new" replace />} />
+        <Route path="transaction/record-payment" element={<Navigate to="/transaction/receipts/new" replace />} />
+        <Route path="transaction/receipt" element={<Navigate to="/transaction/receipts" replace />} />
+        <Route path="transaction/customer-receipts" element={<Navigate to="/transaction/receipts" replace />} />
 
         {/* Transaction Module - Tally Upload */}
         <Route path="transaction/tally-upload" element={<TallyUploadPage />} />

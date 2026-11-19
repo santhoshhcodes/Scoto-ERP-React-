@@ -28,7 +28,11 @@ import {
   CreditCard,
   Building2,
   Calendar,
+  ShieldCheck,
+  ShieldAlert,
+  AlertTriangle,
 } from 'lucide-react';
+import { useCustomerClients } from '../../../api/customerReportApi';
 import {
   useTravelEmployees,
   useTravelClaims,
@@ -1068,6 +1072,7 @@ export const TravelExpensePage = () => {
                     >
                       Client & Destination
                     </SortableHeader>
+                    <th className="px-4 py-3.5 text-left">Attendance Audit</th>
                     <th className="px-4 py-3.5">Breakdown</th>
                     <SortableHeader
                       sortKey="total_amount"
@@ -1093,14 +1098,14 @@ export const TravelExpensePage = () => {
                 <tbody className="divide-y divide-slate-100 bg-white">
                   {isClaimsLoading ? (
                     <tr>
-                      <td colSpan={7} className="py-12 text-center text-slate-400">
+                      <td colSpan={8} className="py-12 text-center text-slate-400">
                         <RefreshCw className="mx-auto h-6 w-6 animate-spin text-indigo-600 mb-2" />
                         <p className="font-semibold">Loading claims...</p>
                       </td>
                     </tr>
                   ) : filteredClaims.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="py-12 text-center text-slate-400">
+                      <td colSpan={8} className="py-12 text-center text-slate-400">
                         <Compass className="mx-auto h-8 w-8 text-slate-300 mb-2" />
                         <p className="font-semibold text-slate-600">
                           No travel claims found for {periodLabel}.
@@ -1132,8 +1137,13 @@ export const TravelExpensePage = () => {
 
                         {/* Client & Destination */}
                         <td className="px-4 py-3.5 align-top max-w-[220px]">
-                          <div className="font-semibold text-slate-900 truncate">
-                            {claim.client_name || 'Direct Visit'}
+                          <div className="font-semibold text-slate-900 truncate flex items-center gap-1.5">
+                            {claim.client_code && (
+                              <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-mono text-[10px] font-bold shrink-0">
+                                {claim.client_code}
+                              </span>
+                            )}
+                            <span className="truncate">{claim.client_name || 'Direct Visit'}</span>
                           </div>
                           <div className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
                             <MapPin className="h-3 w-3 text-rose-500 shrink-0" />
@@ -1142,6 +1152,44 @@ export const TravelExpensePage = () => {
                           <div className="text-xs text-slate-400 italic truncate mt-0.5">
                             "{claim.purpose}"
                           </div>
+                        </td>
+
+                        {/* Attendance Audit Badge */}
+                        <td className="px-4 py-3.5 align-top whitespace-nowrap">
+                          {claim.attendance_audit ? (
+                            <div className="flex flex-col gap-1 items-start">
+                              {claim.attendance_audit.status === 'VERIFIED' ? (
+                                <span
+                                  className="inline-flex items-center gap-1 rounded-md bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-xs font-bold text-emerald-800"
+                                  title={claim.attendance_audit.message}
+                                >
+                                  <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
+                                  On-Site Verified
+                                </span>
+                              ) : claim.attendance_audit.status === 'PARTIAL' ? (
+                                <span
+                                  className="inline-flex items-center gap-1 rounded-md bg-amber-50 border border-amber-200 px-2 py-0.5 text-xs font-bold text-amber-800"
+                                  title={claim.attendance_audit.message}
+                                >
+                                  <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />
+                                  Partial ({claim.attendance_audit.verified_days}/{claim.attendance_audit.working_days}d)
+                                </span>
+                              ) : (
+                                <span
+                                  className="inline-flex items-center gap-1 rounded-md bg-rose-50 border border-rose-200 px-2 py-0.5 text-xs font-bold text-rose-700"
+                                  title={claim.attendance_audit.message}
+                                >
+                                  <ShieldAlert className="h-3.5 w-3.5 text-rose-600" />
+                                  No On-Site Record
+                                </span>
+                              )}
+                              <span className="text-[10px] text-slate-500 font-mono">
+                                {claim.attendance_audit.verified_days}/{claim.attendance_audit.working_days} working days
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-slate-400 text-xs italic">-</span>
+                          )}
                         </td>
 
                         {/* Category Badges */}
@@ -1493,10 +1541,16 @@ const CreateClaimModal = ({ onClose, employees, availablePettyCash, onSuccess })
   const [employeeCode, setEmployeeCode] = useState(employees[0]?.employee_code || '');
   const [travelStartDate, setTravelStartDate] = useState(todayStr);
   const [travelEndDate, setTravelEndDate] = useState(todayStr);
-  const [clientName, setClientName] = useState('');
+  const [clientSearchTerm, setClientSearchTerm] = useState('');
+  const [selectedClient, setSelectedClient] = useState(null);
+  const [isClientDropdownOpen, setIsClientDropdownOpen] = useState(false);
   const [destination, setDestination] = useState('');
   const [purpose, setPurpose] = useState('');
   const [settleImmediately, setSettleImmediately] = useState(false);
+
+  // Customer clients query from Acc_Mst_Ledger
+  const { data: clientsData } = useCustomerClients(clientSearchTerm);
+  const clientOptions = Array.isArray(clientsData) ? clientsData : (clientsData?.data || []);
 
   const [items, setItems] = useState([
     {
@@ -1573,7 +1627,8 @@ const CreateClaimModal = ({ onClose, employees, availablePettyCash, onSuccess })
       employee_code: employeeCode,
       travel_start_date: travelStartDate,
       travel_end_date: travelEndDate,
-      client_name: clientName.trim() || null,
+      client_code: selectedClient?.LedgerCode || null,
+      client_name: (selectedClient?.LedgerName || clientSearchTerm).trim() || null,
       destination: destination.trim(),
       purpose: purpose.trim(),
       status: settleImmediately ? 'PAID' : 'PENDING',
@@ -1640,17 +1695,81 @@ const CreateClaimModal = ({ onClose, employees, availablePettyCash, onSuccess })
               </select>
             </div>
 
-            <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
-                Client / Company
+            <div className="relative">
+              <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5 flex items-center justify-between">
+                <span>Client / Company</span>
+                {selectedClient && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedClient(null);
+                      setClientSearchTerm('');
+                    }}
+                    className="text-[10px] text-rose-600 hover:text-rose-700 font-semibold inline-flex items-center gap-0.5 cursor-pointer lowercase"
+                  >
+                    <X className="h-3 w-3" /> clear
+                  </button>
+                )}
               </label>
-              <input
-                type="text"
-                value={clientName}
-                onChange={(e) => setClientName(e.target.value)}
-                placeholder="e.g. SCM, Titan, Ashok Leyland..."
-                className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-sm"
-              />
+
+              {selectedClient ? (
+                <div className="flex items-center justify-between bg-indigo-50/70 border border-indigo-200 rounded-xl px-3 py-2 text-xs text-slate-800">
+                  <div className="flex items-center gap-2 overflow-hidden">
+                    <span className="px-1.5 py-0.5 rounded bg-indigo-200/80 text-indigo-900 font-mono font-bold text-[10px] shrink-0">
+                      {selectedClient.LedgerCode}
+                    </span>
+                    <span className="font-bold text-slate-900 truncate">{selectedClient.LedgerName}</span>
+                    {selectedClient.City && (
+                      <span className="text-slate-500 text-[11px] shrink-0">
+                        • {selectedClient.City}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={clientSearchTerm}
+                    onChange={(e) => {
+                      setClientSearchTerm(e.target.value);
+                      setIsClientDropdownOpen(true);
+                    }}
+                    onFocus={() => setIsClientDropdownOpen(true)}
+                    placeholder="Search client (e.g. SCM, Titan) or type name..."
+                    className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-sm text-slate-800 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                  {isClientDropdownOpen && clientSearchTerm.trim().length > 0 && (
+                    <div className="absolute z-30 mt-1 max-h-48 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white py-1 shadow-xl text-xs">
+                      {clientOptions && clientOptions.length > 0 ? (
+                        clientOptions.slice(0, 8).map((client) => (
+                          <div
+                            key={client.LedgerCode || client.id}
+                            onMouseDown={() => {
+                              setSelectedClient(client);
+                              setClientSearchTerm(client.LedgerName);
+                              if (client.City && !destination) {
+                                setDestination(client.City);
+                              }
+                              setIsClientDropdownOpen(false);
+                            }}
+                            className="px-3.5 py-2 hover:bg-indigo-50 cursor-pointer flex items-center justify-between text-slate-700"
+                          >
+                            <span className="font-semibold text-slate-900 truncate mr-2">{client.LedgerName}</span>
+                            <span className="text-[10px] text-slate-400 font-mono shrink-0">
+                              {client.LedgerCode} {client.City ? `• ${client.City}` : ''}
+                            </span>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="px-3 py-2 text-[11px] text-slate-400 italic">
+                          Custom client: "{clientSearchTerm}" will be saved.
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             <div>
@@ -1914,7 +2033,7 @@ const ClaimDetailModal = ({ claimId, claimData, isLoading, onClose, onSettle, on
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-xs overflow-y-auto">
-      <div className="w-full max-w-lg my-6 rounded-2xl bg-white shadow-2xl border border-slate-200 flex flex-col max-h-[90vh]">
+      <div className="w-full max-w-xl my-6 rounded-2xl bg-white shadow-2xl border border-slate-200 flex flex-col max-h-[90vh]">
         <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4 bg-slate-50 rounded-t-2xl">
           <div className="flex items-center gap-2.5">
             <h2 className="text-base font-bold text-slate-900">Claim #{claimData.claim_id}</h2>
@@ -1946,8 +2065,13 @@ const ClaimDetailModal = ({ claimId, claimData, isLoading, onClose, onSettle, on
             </div>
             <div>
               <span className="text-slate-400 font-bold uppercase text-[10px]">Client:</span>
-              <div className="font-bold text-slate-900 text-sm">
-                {claimData.client_name || '-'}
+              <div className="font-bold text-slate-900 text-sm flex items-center gap-1.5">
+                {claimData.client_code && (
+                  <span className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-800 font-mono text-[10px] font-bold">
+                    {claimData.client_code}
+                  </span>
+                )}
+                <span>{claimData.client_name || '-'}</span>
               </div>
             </div>
             <div>
@@ -1965,6 +2089,111 @@ const ClaimDetailModal = ({ claimId, claimData, isLoading, onClose, onSettle, on
               <div className="font-medium text-slate-800 italic">"{claimData.purpose}"</div>
             </div>
           </div>
+
+          {/* Attendance & Deployment Cross-Check Card */}
+          {claimData.attendance_audit && (
+            <div
+              className={`rounded-xl border p-4 text-xs space-y-2.5 ${
+                claimData.attendance_audit.status === 'VERIFIED'
+                  ? 'border-emerald-200 bg-emerald-50/40 text-emerald-950'
+                  : claimData.attendance_audit.status === 'PARTIAL'
+                  ? 'border-amber-200 bg-amber-50/40 text-amber-950'
+                  : 'border-rose-200 bg-rose-50/40 text-rose-950'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  {claimData.attendance_audit.status === 'VERIFIED' ? (
+                    <ShieldCheck className="h-5 w-5 text-emerald-600 shrink-0" />
+                  ) : claimData.attendance_audit.status === 'PARTIAL' ? (
+                    <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0" />
+                  ) : (
+                    <ShieldAlert className="h-5 w-5 text-rose-600 shrink-0" />
+                  )}
+                  <div>
+                    <div className="font-bold text-slate-900 text-xs">
+                      Attendance & Deployment Audit:{' '}
+                      <span
+                        className={
+                          claimData.attendance_audit.status === 'VERIFIED'
+                            ? 'text-emerald-700'
+                            : claimData.attendance_audit.status === 'PARTIAL'
+                            ? 'text-amber-700'
+                            : 'text-rose-700'
+                        }
+                      >
+                        {claimData.attendance_audit.badge_text}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-600">
+                      {claimData.attendance_audit.message}
+                    </div>
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="text-xs font-mono font-bold text-slate-800">
+                    {claimData.attendance_audit.verified_days} / {claimData.attendance_audit.working_days} Days
+                  </div>
+                  <div className="text-[10px] text-slate-400">On-Site Regularized</div>
+                </div>
+              </div>
+
+              {/* Day-by-day Deployment Breakdown if available */}
+              {claimData.attendance_audit.daily_breakdown &&
+                claimData.attendance_audit.daily_breakdown.length > 0 && (
+                  <div className="mt-2 pt-2 border-t border-slate-200/80">
+                    <div className="font-semibold text-[11px] text-slate-700 mb-1.5">
+                      Day-by-Day Deployment Verification:
+                    </div>
+                    <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
+                      {claimData.attendance_audit.daily_breakdown.map((day) => (
+                        <div
+                          key={day.date}
+                          className="flex items-center justify-between rounded-lg bg-white/80 border border-slate-200/60 px-2.5 py-1 text-[11px]"
+                        >
+                          <div className="flex items-center gap-2 font-mono">
+                            <span className="font-medium text-slate-800">{day.date}</span>
+                            <span className="text-slate-400 text-[10px]">({day.day_name})</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {day.is_sunday ? (
+                              <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
+                                Sunday Off
+                              </span>
+                            ) : day.is_onsite ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
+                                <CheckCircle2 className="h-3 w-3 text-emerald-600" />
+                                On-Site Confirmed
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded">
+                                <AlertCircle className="h-3 w-3 text-rose-600" />
+                                Not On-Site ({day.review_status || 'Absent'})
+                              </span>
+                            )}
+                            {day.client_name && (
+                              <span className="text-[10px] text-slate-500 max-w-[140px] truncate" title={day.client_name}>
+                                • {day.client_name}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+              {/* Warning for unverified or partial claims */}
+              {claimData.attendance_audit.status !== 'VERIFIED' && (
+                <div className="rounded-lg bg-amber-100/70 border border-amber-300/80 p-2 text-[11px] text-amber-900 flex items-start gap-1.5">
+                  <AlertCircle className="h-3.5 w-3.5 text-amber-700 shrink-0 mt-0.5" />
+                  <span>
+                    <strong>Audit Notice:</strong> This traveler was not recorded as On-Site in daily attendance review on some or all of these dates. Please verify attendance regularization before approving or settling this travel claim.
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="space-y-2">
             <span className="font-bold text-slate-700 text-xs uppercase tracking-wider">

@@ -47,6 +47,7 @@ export const TallyUploadPage = () => {
   // Preview Data State
   const [previewData, setPreviewData] = useState(null);
   const [expandedVoucherIdx, setExpandedVoucherIdx] = useState(null);
+  const [overwriteExisting, setOverwriteExisting] = useState(false);
 
   // Log Table Filters
   const [search, setSearch] = useState('');
@@ -164,10 +165,11 @@ export const TallyUploadPage = () => {
       formData.append('l_code', lCode);
       formData.append('user_id', userId);
       formData.append('user_name', userId);
+      formData.append('overwrite', overwriteExisting ? 'true' : 'false');
 
       const res = await uploadMutation.mutateAsync(formData);
       showToast(
-        `Success! ${res.vouchers_processed} vouchers processed (${res.entries_inserted} ledger entries inserted).`,
+        res.message || `Success! ${res.vouchers_inserted || res.vouchers_processed} vouchers inserted.`,
         'success'
       );
       handleClearFile();
@@ -558,7 +560,17 @@ export const TallyUploadPage = () => {
               </p>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+              <label className="flex items-center gap-2 text-xs text-slate-700 font-medium cursor-pointer bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={overwriteExisting}
+                  onChange={(e) => setOverwriteExisting(e.target.checked)}
+                  className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                />
+                <span>Overwrite if already present</span>
+              </label>
+
               <button
                 type="button"
                 onClick={handleUpload}
@@ -572,7 +584,7 @@ export const TallyUploadPage = () => {
           </div>
 
           {/* Quick Metrics of the Workbook */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs">
             <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
               <span className="text-slate-500 block">Total Debits</span>
               <span className="text-sm font-bold text-slate-900 font-mono">
@@ -587,10 +599,17 @@ export const TallyUploadPage = () => {
               </span>
             </div>
 
-            <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
-              <span className="text-slate-500 block">Matched Ledgers</span>
-              <span className="text-sm font-bold text-emerald-700">
-                {previewData.summary.matched_ledgers_count} Verified in GL
+            <div className="rounded-xl border border-emerald-100 bg-emerald-50/50 p-3">
+              <span className="text-emerald-700 block font-semibold">New to Import</span>
+              <span className="text-sm font-bold text-emerald-800 font-mono">
+                {previewData.summary.new_vouchers_count ?? previewData.summary.total_vouchers} Vouchers
+              </span>
+            </div>
+
+            <div className="rounded-xl border border-amber-100 bg-amber-50/50 p-3">
+              <span className="text-amber-700 block font-semibold">Already In DB</span>
+              <span className="text-sm font-bold text-amber-800 font-mono">
+                {previewData.summary.already_in_db_count ?? 0} {overwriteExisting ? '(Will Overwrite)' : '(Will Skip)'}
               </span>
             </div>
 
@@ -662,7 +681,18 @@ export const TallyUploadPage = () => {
                             {v.trans_date_display}
                           </td>
                           <td className="px-3 py-2 font-mono font-bold text-indigo-700">
-                            {v.voucher_no}
+                            <div className="flex items-center gap-1.5">
+                              <span>{v.voucher_no}</span>
+                              {v.is_already_in_db ? (
+                                <span className="rounded bg-amber-50 border border-amber-200 px-1.5 py-0.5 text-[9px] font-semibold text-amber-700 whitespace-nowrap">
+                                  In DB (Skip)
+                                </span>
+                              ) : (
+                                <span className="rounded bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-700 whitespace-nowrap">
+                                  New
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td className="px-3 py-2">
                             <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-700">

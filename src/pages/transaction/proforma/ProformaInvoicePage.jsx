@@ -8,6 +8,8 @@ import {
   Edit2,
   Trash2,
   CheckCircle2,
+  Check,
+  X,
   ArrowLeft,
   Building2,
   Hash,
@@ -31,6 +33,7 @@ import { useSortableData, SortableHeader } from '../../../utils/sortUtils';
 import { DocumentActionDropdown } from '../../../components/common/DocumentActionDropdown';
 import { DocumentPrintModal } from '../../../components/common/DocumentPrintModal';
 import { useFinancialYear } from '../../../context/FinancialYearContext';
+import { generateNextTransactionNo, getFullFinYear } from '../../../utils/transactionNumberUtils';
 
 export const ProformaInvoicePage = () => {
   const { selectedFinYear } = useFinancialYear();
@@ -101,6 +104,52 @@ export const ProformaInvoicePage = () => {
 
   const [gridItems, setGridItems] = useState([]);
   const [currentRow, setCurrentRow] = useState(INITIAL_ITEM_ROW);
+  const [editingItemIndex, setEditingItemIndex] = useState(null);
+  const [isInterState, setIsInterState] = useState(false);
+
+  // Helper: Detect if customer ledger is outside Tamil Nadu (TN state code is '33')
+  const checkIsInterState = (customer) => {
+    if (!customer) return false;
+    const gstNo = String(customer.GSTNo || customer.gst_no || customer.GST || '').trim();
+    if (gstNo.length >= 2) {
+      return gstNo.substring(0, 2) !== '33';
+    }
+    const state = String(customer.State || customer.state || '').trim().toLowerCase();
+    if (state && !['tamil nadu', 'tamilnadu', 'tn'].includes(state)) {
+      return true;
+    }
+    return false;
+  };
+
+  // Helper: calculate a row's taxes dynamically for Intra (CGST+SGST) vs Inter (IGST)
+  const calculateRowTax = (row, interState) => {
+    const rate = Number(row.Rate) || 0;
+    const qty = Number(row.Qty) || 0;
+    const gstPercent = Number(row.GST) || 0;
+    const itemVal = rate * qty;
+
+    if (interState) {
+      const igst = (itemVal * gstPercent) / 100;
+      return {
+        ...row,
+        ItemValue: itemVal,
+        CGST: 0,
+        SGST: 0,
+        IGST: igst,
+        NetAmount: itemVal + igst,
+      };
+    } else {
+      const halfGst = (itemVal * (gstPercent / 2)) / 100;
+      return {
+        ...row,
+        ItemValue: itemVal,
+        CGST: halfGst,
+        SGST: halfGst,
+        IGST: 0,
+        NetAmount: itemVal + halfGst * 2,
+      };
+    }
+  };
 
   const isApproved = (val) => String(val ?? '').trim() === '1' || String(val ?? '').trim().toLowerCase() === 'approved';
 
@@ -113,8 +162,11 @@ export const ProformaInvoicePage = () => {
   const handleOpenAdd = () => {
     setEditingTransNo(null);
     setNotification(null);
-    const nextNo = `PI-2026-${String(proformas.length + 1).padStart(3, '0')}`;
+    setEditingItemIndex(null);
+    setIsInterState(false);
+    const nextNo = generateNextTransactionNo('SP', selectedFinYear, proformas);
     setFormHeader({
+      FinYearVal: getFullFinYear(selectedFinYear),
       TransNo: nextNo,
       TransDate: new Date().toISOString().split('T')[0],
       QuotationNo: '',
@@ -134,6 +186,11 @@ export const ProformaInvoicePage = () => {
   const handleOpenEdit = (pi) => {
     setEditingTransNo(pi.TransNo);
     setNotification(null);
+    setEditingItemIndex(null);
+    const hasIgst =
+      Number(pi.TotalIGSTAmount || 0) > 0 ||
+      (pi.Items || []).some((it) => Number(it.IGST || 0) > 0);
+    setIsInterState(hasIgst);
     setFormHeader({
       TransNo: pi.TransNo,
       TransDate: pi.TransDate || new Date().toISOString().split('T')[0],
@@ -164,6 +221,9 @@ export const ProformaInvoicePage = () => {
     }
     const matched = availableQuotations.find((q) => q.TransNo === quoNo);
     if (matched) {
+      const cust = availableLedgers.find((l) => l.LedgerName === matched.CustomerName || l.LedgerCode === matched.CustomerCode);
+      const inter = Number(matched.TotalIGSTAmount || 0) > 0 || checkIsInterState(cust);
+      setIsInterState(inter);
       setFormHeader((prev) => ({
         ...prev,
         QuotationNo: matched.TransNo,
@@ -178,18 +238,7 @@ export const ProformaInvoicePage = () => {
   const handleRowChange = (field, value) => {
     setCurrentRow((prev) => {
       const updated = { ...prev, [field]: value };
-      const rate = Number(updated.Rate) || 0;
-      const qty = Number(updated.Qty) || 0;
-      const gst = Number(updated.GST) || 0;
-      const itemVal = rate * qty;
-      const halfGst = (itemVal * (gst / 2)) / 100;
-      const net = itemVal + halfGst * 2;
-
-      updated.ItemValue = itemVal;
-      updated.CGST = halfGst;
-      updated.SGST = halfGst;
-      updated.NetAmount = net;
-      return updated;
+      return calculateRowTax(updated, isInterState);
     });
   };
 
@@ -199,10 +248,37 @@ export const ProformaInvoicePage = () => {
       alert('Please enter valid product details.');
       return;
     }
-    setGridItems((prev) => [...prev, { ...currentRow, order_id: String(prev.length + 1) }]);
+    if (editingItemIndex !== null) {
+      setGridItems((prev) =>
+        prev.map((item, idx) =>
+          idx === editingItemIndex ? { ...currentRow, order_id: item.order_id || String(idx + 1) } : item
+        )
+      );
+      setEditingItemIndex(null);
+      setCurrentRow(INITIAL_ITEM_ROW);
+    } else {
+      setGridItems((prev) => [...prev, { ...currentRow, order_id: String(prev.length + 1) }]);
+      setCurrentRow(INITIAL_ITEM_ROW);
+    }
+  };
+
+  const handleEditItem = (index) => {
+    const itemToEdit = gridItems[index];
+    if (!itemToEdit) return;
+    setEditingItemIndex(index);
+    setCurrentRow({ ...itemToEdit });
+  };
+
+  const handleCancelItemEdit = () => {
+    setEditingItemIndex(null);
+    setCurrentRow(INITIAL_ITEM_ROW);
   };
 
   const handleRemoveItem = (index) => {
+    if (editingItemIndex === index) {
+      setEditingItemIndex(null);
+      setCurrentRow(INITIAL_ITEM_ROW);
+    }
     setGridItems((prev) => prev.filter((_, i) => i !== index));
   };
 
@@ -228,6 +304,7 @@ export const ProformaInvoicePage = () => {
 
     const payload = {
       ...formHeader,
+      FinYearVal: formHeader.FinYearVal || getFullFinYear(selectedFinYear, formHeader.TransDate),
       TotalQty: totalQty,
       TotalItemAmount: totalItemAmount,
       TotalCGSTAmount: totalCGSTAmount,
@@ -367,7 +444,17 @@ export const ProformaInvoicePage = () => {
                 <input
                   type="date"
                   value={formHeader.TransDate}
-                  onChange={(e) => setFormHeader({ ...formHeader, TransDate: e.target.value })}
+                  onChange={(e) => {
+                    const newDate = e.target.value;
+                    setFormHeader((prev) => {
+                      const updated = { ...prev, TransDate: newDate };
+                      if (!editingTransNo && selectedFinYear === 'ALL') {
+                        updated.TransNo = generateNextTransactionNo('SP', selectedFinYear, proformas, newDate);
+                        updated.FinYearVal = getFullFinYear(selectedFinYear, newDate);
+                      }
+                      return updated;
+                    });
+                  }}
                   className="w-full px-3 py-2 text-sm rounded-lg bg-slate-50 border border-slate-200 text-slate-900"
                   required
                 />
@@ -390,7 +477,26 @@ export const ProformaInvoicePage = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Customer / Party Name</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-slate-700">Customer / Party Name <span className="text-rose-500">*</span></label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextMode = !isInterState;
+                      setIsInterState(nextMode);
+                      setGridItems((prev) => prev.map((item) => calculateRowTax(item, nextMode)));
+                      setCurrentRow((prev) => calculateRowTax(prev, nextMode));
+                    }}
+                    className={`px-2 py-0.5 rounded text-[10px] font-bold border transition-colors cursor-pointer ${
+                      isInterState
+                        ? 'bg-purple-100 text-purple-800 border-purple-300'
+                        : 'bg-indigo-100 text-indigo-800 border-indigo-300'
+                    }`}
+                    title="Click to manually toggle between Intra-State (CGST+SGST) and Inter-State (IGST)"
+                  >
+                    {isInterState ? '🌐 Inter-State (IGST)' : '📍 Intra-State (CGST+SGST)'}
+                  </button>
+                </div>
                 <input
                   type="text"
                   list="pi-ledgers"
@@ -398,11 +504,17 @@ export const ProformaInvoicePage = () => {
                   onChange={(e) => {
                     const name = e.target.value;
                     const matched = availableLedgers.find((l) => l.LedgerName === name);
+                    const inter = checkIsInterState(matched);
+                    setIsInterState(inter);
                     setFormHeader({
                       ...formHeader,
                       CustomerName: name,
                       CustomerCode: matched?.LedgerCode || formHeader.CustomerCode,
                     });
+                    if (gridItems.length > 0) {
+                      setGridItems((prev) => prev.map((item) => calculateRowTax(item, inter)));
+                    }
+                    setCurrentRow((prev) => calculateRowTax(prev, inter));
                   }}
                   className="w-full px-3 py-2 text-sm rounded-lg bg-slate-50 border border-slate-200 text-slate-900"
                   required
@@ -492,14 +604,36 @@ export const ProformaInvoicePage = () => {
                   <option value={28}>28%</option>
                 </select>
               </div>
-              <div className="flex items-end">
-                <button
-                  type="button"
-                  onClick={handleAddItem}
-                  className="w-full py-1.5 rounded bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold cursor-pointer"
-                >
-                  + Add
-                </button>
+              <div className="flex items-end gap-1.5">
+                {editingItemIndex !== null ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleAddItem}
+                      className="flex-1 py-1.5 px-2 rounded bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold shadow-xs transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                      title="Update this line item"
+                    >
+                      <Check className="h-3.5 w-3.5" />
+                      Update
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCancelItemEdit}
+                      className="py-1.5 px-2 rounded bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-semibold transition-colors flex items-center justify-center cursor-pointer"
+                      title="Cancel item editing"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleAddItem}
+                    className="w-full py-1.5 rounded bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold cursor-pointer"
+                  >
+                    + Add
+                  </button>
+                )}
               </div>
             </div>
 
@@ -520,7 +654,14 @@ export const ProformaInvoicePage = () => {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {gridItems.map((item, idx) => (
-                    <tr key={idx} className="hover:bg-slate-50/70">
+                    <tr
+                      key={idx}
+                      className={
+                        editingItemIndex === idx
+                          ? 'bg-amber-50/80 ring-1 ring-amber-300 transition-colors'
+                          : 'hover:bg-slate-50/70'
+                      }
+                    >
                       <td className="px-3 py-2 font-semibold text-slate-900">{item.ProductType}</td>
                       <td className="px-2 py-2 font-mono text-slate-500">{item.HSNCode}</td>
                       <td className="px-3 py-2 text-right font-mono">₹{Number(item.Rate).toFixed(2)}</td>
@@ -531,13 +672,24 @@ export const ProformaInvoicePage = () => {
                         ₹{Number(item.NetAmount).toFixed(2)}
                       </td>
                       <td className="px-2 py-2 text-center">
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveItem(idx)}
-                          className="p-1 rounded text-rose-600 hover:bg-rose-50 cursor-pointer"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                        <div className="flex items-center justify-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleEditItem(idx)}
+                            className="p-1 rounded text-indigo-600 hover:bg-indigo-50 transition-colors cursor-pointer"
+                            title="Edit item"
+                          >
+                            <Edit2 className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveItem(idx)}
+                            className="p-1 rounded text-rose-600 hover:bg-rose-50 cursor-pointer"
+                            title="Remove item"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -557,10 +709,21 @@ export const ProformaInvoicePage = () => {
                   <span className="font-mono font-bold text-slate-900">₹{totalItemAmount.toFixed(2)}</span>
                 </div>
                 <div>
-                  <span className="font-semibold text-slate-600">CGST/SGST: </span>
-                  <span className="font-mono font-bold text-slate-900">
-                    ₹{(totalCGSTAmount + totalSGSTAmount).toFixed(2)}
-                  </span>
+                  {totalIGSTAmount > 0 || isInterState ? (
+                    <>
+                      <span className="font-semibold text-purple-700">IGST: </span>
+                      <span className="font-mono font-bold text-purple-900">
+                        ₹{totalIGSTAmount.toFixed(2)}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="font-semibold text-slate-600">CGST/SGST: </span>
+                      <span className="font-mono font-bold text-slate-900">
+                        ₹{(totalCGSTAmount + totalSGSTAmount).toFixed(2)}
+                      </span>
+                    </>
+                  )}
                 </div>
                 <div className="p-2 bg-indigo-50 border border-indigo-100 rounded-lg">
                   <span className="font-bold text-indigo-950">Final Amount: </span>
@@ -626,11 +789,10 @@ export const ProformaInvoicePage = () => {
 
       {notification && (
         <div
-          className={`flex items-center justify-between p-3.5 rounded-xl border text-xs font-semibold ${
-            notification.type === 'success'
+          className={`flex items-center justify-between p-3.5 rounded-xl border text-xs font-semibold ${notification.type === 'success'
               ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
               : 'bg-rose-50 border-rose-200 text-rose-800'
-          }`}
+            }`}
         >
           <span>{notification.message}</span>
           <button onClick={() => setNotification(null)} className="cursor-pointer">&times;</button>
@@ -791,11 +953,10 @@ export const ProformaInvoicePage = () => {
                     </td>
                     <td className="px-4 py-3 text-center">
                       <span
-                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          isApproved(pi.ApprovalStatus)
+                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${isApproved(pi.ApprovalStatus)
                             ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                             : 'bg-amber-50 text-amber-700 border border-amber-200'
-                        }`}
+                          }`}
                       >
                         {isApproved(pi.ApprovalStatus) ? 'Approved' : 'Pending'}
                       </span>

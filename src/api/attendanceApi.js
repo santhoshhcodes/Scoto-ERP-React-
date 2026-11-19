@@ -213,6 +213,17 @@ export const attendanceApi = {
   deleteHoliday: async (id) => {
     return await apiClient.delete(API_ENDPOINTS.ATTENDANCE.HOLIDAY_BY_ID(id));
   },
+
+  /**
+   * 13. PUT /api/v1/attendance/employee-shift-timing
+   * Update an individual employee's assigned shift timings (e.g. 19:30 or 18:45).
+   */
+  updateEmployeeShiftTiming: async (payload) => {
+    return await apiClient.put(
+      API_ENDPOINTS.ATTENDANCE.EMPLOYEE_SHIFT_TIMING,
+      payload
+    );
+  },
 };
 
 // ==========================================
@@ -339,6 +350,19 @@ export const useSaveLateFine = () => {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: attendanceApi.saveLateFine,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['attendance', 'daily_summary'] });
+    },
+  });
+};
+
+/**
+ * Hook for updating individual employee shift timing (PUT /api/v1/attendance/employee-shift-timing)
+ */
+export const useUpdateEmployeeShiftTiming = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: attendanceApi.updateEmployeeShiftTiming,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['attendance', 'daily_summary'] });
     },

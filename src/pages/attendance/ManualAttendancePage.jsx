@@ -18,9 +18,10 @@ import {
   ChevronDown,
   Briefcase,
   X,
+  Building2,
 } from 'lucide-react';
 import { StatCard, StatusBadge, ExcelImportModal } from '../../components/common';
-import { exportDailyAttendanceExcel, exportMonthlyAttendanceExcel, exportToExcel } from '../../utils/excelUtils';
+import { exportDailyAttendanceExcel, exportMonthlyAttendanceExcel, exportToExcel, formatMinutesToHM } from '../../utils/excelUtils';
 import {
   attendanceApi,
   useDailySummary,
@@ -282,6 +283,11 @@ export const ManualAttendancePage = () => {
         await saveDailyReviewMutation.mutateAsync({
           employee_code: payload.employee_code,
           attendance_date: payload.attendance_date,
+          start_date: payload.start_date,
+          end_date: payload.end_date,
+          client_name: payload.client_name,
+          client_code: payload.client_code,
+          place_of_visit: payload.place_of_visit,
           review_status: payload.review_status,
           review_category: payload.review_category,
           review_reason: payload.review_reason,
@@ -289,6 +295,8 @@ export const ManualAttendancePage = () => {
           corrected_check_out: payload.corrected_check_out,
           reviewed_by: payload.reviewed_by,
           permission_minutes: payload.apply_permission && payload.permission_minutes > 0 ? Number(payload.permission_minutes) : null,
+          set_on_site_master: payload.set_on_site_master,
+          remove_on_site_master: payload.remove_on_site_master,
         });
 
         if (payload.apply_permission && payload.permission_minutes > 0) {
@@ -928,7 +936,7 @@ export const ManualAttendancePage = () => {
                             </div>
                             {rec.late_minutes > 0 && rec.fine_status !== 'WAIVED' && (
                               <span className="text-[10px] text-rose-600 font-semibold block mt-0.5">
-                                Late: {rec.late_minutes}m
+                                Late: {formatMinutesToHM(rec.late_minutes)}
                               </span>
                             )}
                           </div>
@@ -955,7 +963,7 @@ export const ManualAttendancePage = () => {
                             </div>
                             {earlyMinutes && earlyMinutes > 0 ? (
                               <span className="text-[10px] text-amber-600 font-semibold block mt-0.5">
-                                Early: {earlyMinutes}m
+                                Early: {formatMinutesToHM(earlyMinutes)}
                               </span>
                             ) : null}
                           </div>
@@ -1000,7 +1008,7 @@ export const ManualAttendancePage = () => {
                           {rec.permission_minutes > 0 ? (
                             <span className="inline-flex items-center gap-1 rounded bg-purple-50 px-2 py-0.5 text-[11px] font-semibold text-purple-700 border border-purple-200">
                               <Clock className="h-3 w-3 text-purple-600" />
-                              Perm: +{rec.permission_minutes}m
+                              Perm: +{formatMinutesToHM(rec.permission_minutes)}
                             </span>
                           ) : null}
 
@@ -1052,13 +1060,26 @@ export const ManualAttendancePage = () => {
                                             ? 'On Duty'
                                             : rec.review_status}
                             </span>
-                            {rec.review_reason &&
+                            {rec.client_name ? (
+                              <div
+                                className="mt-1 inline-flex items-center gap-1 rounded bg-sky-50 px-1.5 py-0.5 text-[10px] font-semibold text-sky-800 border border-sky-200"
+                                title={`${rec.client_name}${rec.place_of_visit ? ` • ${rec.place_of_visit}` : ''}`}
+                              >
+                                <Building2 className="h-2.5 w-2.5 text-sky-600 shrink-0" />
+                                <span className="truncate max-w-[120px]">{rec.client_name}</span>
+                                {rec.place_of_visit && (
+                                  <span className="text-sky-600 font-normal truncate max-w-[70px]">
+                                    • {rec.place_of_visit}
+                                  </span>
+                                )}
+                              </div>
+                            ) : rec.review_reason &&
                               !rec.review_reason.toLowerCase().includes('regularized') &&
-                              !rec.review_reason.toLowerCase().includes('confirmed directly') && (
+                              !rec.review_reason.toLowerCase().includes('confirmed directly') ? (
                                 <div className="text-slate-500 truncate max-w-[130px] text-[10px]" title={rec.review_reason}>
                                   {rec.review_reason}
                                 </div>
-                              )}
+                              ) : null}
                           </div>
                         ) : (rec.is_on_site ?? rec.is_on_field) ? (
                           <div className="text-[11px]">
@@ -1078,7 +1099,7 @@ export const ManualAttendancePage = () => {
                             </span>
                             {rec.late_minutes > 0 ? (
                               <div className="text-rose-600 font-medium text-[10px]">
-                                Late: {rec.late_minutes}m
+                                Late: {formatMinutesToHM(rec.late_minutes)}
                               </div>
                             ) : !hasDistinctOut ? (
                               <div className="text-amber-600 font-medium text-[10px]">

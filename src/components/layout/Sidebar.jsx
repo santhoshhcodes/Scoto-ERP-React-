@@ -28,6 +28,7 @@ import {
   CalendarRange,
   Compass,
   PieChart,
+  UploadCloud,
 } from 'lucide-react';
 import scotoLogo from '../../assets/Scoto.png';
 
@@ -115,6 +116,11 @@ const SALES_INVOICE_SUB_NAVIGATION = [
     icon: Printer,
   },
   {
+    name: 'Bulk Invoice Importer',
+    path: '/transaction/sales-invoices/bulk-upload',
+    icon: UploadCloud,
+  },
+  {
     name: 'Sales Invoice Approval',
     path: '/transaction/sales-invoice-approval',
     icon: CheckSquare,
@@ -168,6 +174,7 @@ export const Sidebar = ({
     location.pathname.includes('/transaction/delivery');
 
   const isSalesInvoiceActive = location.pathname.includes('/transaction/sales-invoice');
+  const isReceiptActive = location.pathname.includes('/transaction/receipt');
   const isTallyActive = location.pathname.includes('/transaction/tally') || location.pathname.includes('/tally-upload');
   const isOfficeExpenseActive =
     location.pathname.includes('/transaction/office-expense') ||
@@ -180,6 +187,7 @@ export const Sidebar = ({
     location.pathname.startsWith('/transaction') ||
     isQuotationActive ||
     isSalesInvoiceActive ||
+    isReceiptActive ||
     isTallyActive ||
     isOfficeExpenseActive;
 
@@ -219,6 +227,13 @@ export const Sidebar = ({
       setIsAttendanceDropdownOpen(false);
       setIsMasterDropdownOpen(false);
       setIsQuotationMenuOpen(true);
+      setIsSalesInvMenuOpen(false);
+      setIsExpenseMenuOpen(false);
+    } else if (isReceiptActive) {
+      setIsTransactionDropdownOpen(true);
+      setIsAttendanceDropdownOpen(false);
+      setIsMasterDropdownOpen(false);
+      setIsQuotationMenuOpen(false);
       setIsSalesInvMenuOpen(false);
       setIsExpenseMenuOpen(false);
     } else if (isTallyActive) {
@@ -406,29 +421,26 @@ export const Sidebar = ({
     <>
       {/* Mobile Drawer Backdrop */}
       <div
-        className={`fixed inset-0 z-40 bg-slate-950/75 backdrop-blur-xs transition-opacity duration-300 lg:hidden ${
-          isExpanded ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
-        }`}
+        className={`fixed inset-0 z-40 bg-slate-950/75 backdrop-blur-xs transition-opacity duration-300 lg:hidden ${isExpanded ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+          }`}
         onClick={handleClose}
         aria-label="Close sidebar backdrop"
       />
 
       {/* Main Enterprise ERP Sidebar */}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 flex flex-col bg-slate-900 text-slate-300 transition-all duration-300 ease-in-out lg:static shrink-0 border-r border-slate-800 select-none shadow-xl ${
-          isExpanded
+        className={`fixed inset-y-0 left-0 z-50 flex flex-col bg-slate-900 text-slate-300 transition-all duration-300 ease-in-out lg:static shrink-0 border-r border-slate-800 select-none shadow-xl ${isExpanded
             ? 'w-64 translate-x-0'
             : '-translate-x-full lg:translate-x-0 lg:w-20'
-        }`}
+          }`}
       >
         {/* Brand Header */}
         <div
           onClick={() => {
             if (!isExpanded && onExpand) onExpand();
           }}
-          className={`flex h-16 shrink-0 items-center justify-between border-b border-slate-800/90 px-3.5 bg-slate-950/40 ${
-            !isExpanded ? 'cursor-pointer hover:bg-slate-800/50' : ''
-          }`}
+          className={`flex h-16 shrink-0 items-center justify-between border-b border-slate-800/90 px-3.5 bg-slate-950/40 ${!isExpanded ? 'cursor-pointer hover:bg-slate-800/50' : ''
+            }`}
           title={!isExpanded ? 'Click to expand sidebar' : undefined}
         >
           <div className="flex items-center gap-2.5 overflow-hidden">
@@ -483,14 +495,12 @@ export const Sidebar = ({
                   title={!isExpanded ? item.name : undefined}
                   onClick={handleCoreNavClick}
                   className={({ isActive }) =>
-                    `group relative flex items-center rounded-xl transition-all cursor-pointer ${
-                      isExpanded
-                        ? 'justify-between px-3.5 py-2.5 text-sm font-medium'
-                        : 'justify-center p-3 text-sm'
-                    } ${
-                      isActive
-                        ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30 font-semibold'
-                        : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+                    `group relative flex items-center rounded-xl transition-all cursor-pointer ${isExpanded
+                      ? 'justify-between px-3.5 py-2.5 text-sm font-medium'
+                      : 'justify-center p-3 text-sm'
+                    } ${isActive
+                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30 font-semibold'
+                      : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
                     }`
                   }
                 >
@@ -498,11 +508,10 @@ export const Sidebar = ({
                     <>
                       <div className="flex items-center gap-3">
                         <Icon
-                          className={`h-5 w-5 shrink-0 transition-colors ${
-                            isActive
+                          className={`h-5 w-5 shrink-0 transition-colors ${isActive
                               ? 'text-white'
                               : 'text-slate-400 group-hover:text-slate-200'
-                          }`}
+                            }`}
                         />
                         {isExpanded && <span className="truncate">{item.name}</span>}
                       </div>
@@ -528,26 +537,23 @@ export const Sidebar = ({
                 <button
                   type="button"
                   onClick={handleAttendanceClick}
-                  className={`w-full group flex items-center justify-between rounded-xl px-3.5 py-2.5 text-sm font-medium transition-all cursor-pointer ${
-                    isAttendanceActive || isAttendanceDropdownOpen
+                  className={`w-full group flex items-center justify-between rounded-xl px-3.5 py-2.5 text-sm font-medium transition-all cursor-pointer ${isAttendanceActive || isAttendanceDropdownOpen
                       ? 'bg-slate-800/90 text-white font-semibold'
                       : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
-                  }`}
+                    }`}
                 >
                   <div className="flex items-center gap-3">
                     <ScanFace
-                      className={`h-5 w-5 shrink-0 transition-colors ${
-                        isAttendanceActive
+                      className={`h-5 w-5 shrink-0 transition-colors ${isAttendanceActive
                           ? 'text-indigo-400'
                           : 'text-slate-400 group-hover:text-slate-200'
-                      }`}
+                        }`}
                     />
                     <span>Attendance</span>
                   </div>
                   <ChevronDown
-                    className={`h-4 w-4 text-slate-400 transition-transform duration-200 ${
-                      isAttendanceDropdownOpen ? 'rotate-0' : '-rotate-90'
-                    }`}
+                    className={`h-4 w-4 text-slate-400 transition-transform duration-200 ${isAttendanceDropdownOpen ? 'rotate-0' : '-rotate-90'
+                      }`}
                   />
                 </button>
 
@@ -566,21 +572,19 @@ export const Sidebar = ({
                             }
                           }}
                           className={({ isActive }) =>
-                            `group flex items-center justify-between rounded-lg px-3 py-2 text-xs font-medium transition-all cursor-pointer ${
-                              isActive
-                                ? 'bg-indigo-600 text-white shadow-sm font-semibold'
-                                : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+                            `group flex items-center justify-between rounded-lg px-3 py-2 text-xs font-medium transition-all cursor-pointer ${isActive
+                              ? 'bg-indigo-600 text-white shadow-sm font-semibold'
+                              : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
                             }`
                           }
                         >
                           {({ isActive }) => (
                             <div className="flex items-center gap-2.5 truncate">
                               <SubIcon
-                                className={`h-4 w-4 shrink-0 transition-colors ${
-                                  isActive
+                                className={`h-4 w-4 shrink-0 transition-colors ${isActive
                                     ? 'text-white'
                                     : 'text-slate-400 group-hover:text-slate-200'
-                                }`}
+                                  }`}
                               />
                               <span className="truncate">{subItem.name}</span>
                             </div>
@@ -598,18 +602,16 @@ export const Sidebar = ({
                   type="button"
                   onClick={handleAttendanceClick}
                   title="Attendance - Click to open"
-                  className={`group relative flex items-center justify-center p-3 rounded-xl transition-all cursor-pointer ${
-                    isAttendanceActive
+                  className={`group relative flex items-center justify-center p-3 rounded-xl transition-all cursor-pointer ${isAttendanceActive
                       ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
                       : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
-                  }`}
+                    }`}
                 >
                   <ScanFace
-                    className={`h-5 w-5 shrink-0 ${
-                      isAttendanceActive
+                    className={`h-5 w-5 shrink-0 ${isAttendanceActive
                         ? 'text-white'
                         : 'text-slate-400 group-hover:text-slate-200'
-                    }`}
+                      }`}
                   />
 
                   {/* Active Indicator Dot */}
@@ -634,26 +636,23 @@ export const Sidebar = ({
                 <button
                   type="button"
                   onClick={handleMasterClick}
-                  className={`w-full group flex items-center justify-between rounded-xl px-3.5 py-2.5 text-sm font-medium transition-all cursor-pointer ${
-                    isMasterActive || isMasterDropdownOpen
+                  className={`w-full group flex items-center justify-between rounded-xl px-3.5 py-2.5 text-sm font-medium transition-all cursor-pointer ${isMasterActive || isMasterDropdownOpen
                       ? 'bg-slate-800/90 text-white font-semibold'
                       : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
-                  }`}
+                    }`}
                 >
                   <div className="flex items-center gap-3">
                     <Layers
-                      className={`h-5 w-5 shrink-0 transition-colors ${
-                        isMasterActive
+                      className={`h-5 w-5 shrink-0 transition-colors ${isMasterActive
                           ? 'text-indigo-400'
                           : 'text-slate-400 group-hover:text-slate-200'
-                      }`}
+                        }`}
                     />
                     <span>Master</span>
                   </div>
                   <ChevronDown
-                    className={`h-4 w-4 text-slate-400 transition-transform duration-200 ${
-                      isMasterDropdownOpen ? 'rotate-0' : '-rotate-90'
-                    }`}
+                    className={`h-4 w-4 text-slate-400 transition-transform duration-200 ${isMasterDropdownOpen ? 'rotate-0' : '-rotate-90'
+                      }`}
                   />
                 </button>
 
@@ -672,21 +671,19 @@ export const Sidebar = ({
                             }
                           }}
                           className={({ isActive }) =>
-                            `group flex items-center justify-between rounded-lg px-3 py-2 text-xs font-medium transition-all cursor-pointer ${
-                              isActive
-                                ? 'bg-indigo-600 text-white shadow-sm font-semibold'
-                                : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+                            `group flex items-center justify-between rounded-lg px-3 py-2 text-xs font-medium transition-all cursor-pointer ${isActive
+                              ? 'bg-indigo-600 text-white shadow-sm font-semibold'
+                              : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
                             }`
                           }
                         >
                           {({ isActive }) => (
                             <div className="flex items-center gap-2.5 truncate">
                               <SubIcon
-                                className={`h-4 w-4 shrink-0 transition-colors ${
-                                  isActive
+                                className={`h-4 w-4 shrink-0 transition-colors ${isActive
                                     ? 'text-white'
                                     : 'text-slate-400 group-hover:text-slate-200'
-                                }`}
+                                  }`}
                               />
                               <span className="truncate">{subItem.name}</span>
                             </div>
@@ -704,18 +701,16 @@ export const Sidebar = ({
                   type="button"
                   onClick={handleMasterClick}
                   title="Master (Item & Ledger) - Click to open"
-                  className={`group relative flex items-center justify-center p-3 rounded-xl transition-all cursor-pointer ${
-                    isMasterActive
+                  className={`group relative flex items-center justify-center p-3 rounded-xl transition-all cursor-pointer ${isMasterActive
                       ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
                       : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
-                  }`}
+                    }`}
                 >
                   <Layers
-                    className={`h-5 w-5 shrink-0 ${
-                      isMasterActive
+                    className={`h-5 w-5 shrink-0 ${isMasterActive
                         ? 'text-white'
                         : 'text-slate-400 group-hover:text-slate-200'
-                    }`}
+                      }`}
                   />
 
                   {/* Active Indicator Dot */}
@@ -741,26 +736,23 @@ export const Sidebar = ({
                 <button
                   type="button"
                   onClick={handleTransactionClick}
-                  className={`w-full group flex items-center justify-between rounded-xl px-3.5 py-2.5 text-sm font-medium transition-all cursor-pointer ${
-                    isTransactionActive || isTransactionDropdownOpen
+                  className={`w-full group flex items-center justify-between rounded-xl px-3.5 py-2.5 text-sm font-medium transition-all cursor-pointer ${isTransactionActive || isTransactionDropdownOpen
                       ? 'bg-slate-800/90 text-white font-semibold'
                       : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
-                  }`}
+                    }`}
                 >
                   <div className="flex items-center gap-3">
                     <Repeat
-                      className={`h-5 w-5 shrink-0 transition-colors ${
-                        isTransactionActive
+                      className={`h-5 w-5 shrink-0 transition-colors ${isTransactionActive
                           ? 'text-indigo-400'
                           : 'text-slate-400 group-hover:text-slate-200'
-                      }`}
+                        }`}
                     />
                     <span>Transaction</span>
                   </div>
                   <ChevronDown
-                    className={`h-4 w-4 text-slate-400 transition-transform duration-200 ${
-                      isTransactionDropdownOpen ? 'rotate-0' : '-rotate-90'
-                    }`}
+                    className={`h-4 w-4 text-slate-400 transition-transform duration-200 ${isTransactionDropdownOpen ? 'rotate-0' : '-rotate-90'
+                      }`}
                   />
                 </button>
 
@@ -773,20 +765,18 @@ export const Sidebar = ({
                       <button
                         type="button"
                         onClick={handleToggleQuotation}
-                        className={`w-full group flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-all cursor-pointer ${
-                          isQuotationActive || isQuotationMenuOpen
+                        className={`w-full group flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-all cursor-pointer ${isQuotationActive || isQuotationMenuOpen
                             ? 'bg-slate-800 text-indigo-300'
                             : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
-                        }`}
+                          }`}
                       >
                         <div className="flex items-center gap-2">
                           <FileText className="h-3.5 w-3.5 text-indigo-400" />
                           <span>Quotation</span>
                         </div>
                         <ChevronDown
-                          className={`h-3 w-3 text-slate-400 transition-transform ${
-                            isQuotationMenuOpen ? 'rotate-0' : '-rotate-90'
-                          }`}
+                          className={`h-3 w-3 text-slate-400 transition-transform ${isQuotationMenuOpen ? 'rotate-0' : '-rotate-90'
+                            }`}
                         />
                       </button>
 
@@ -804,10 +794,9 @@ export const Sidebar = ({
                                   }
                                 }}
                                 className={({ isActive }) =>
-                                  `group flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[11px] font-medium transition-all cursor-pointer ${
-                                    isActive
-                                      ? 'bg-indigo-600 text-white shadow-xs font-semibold'
-                                      : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                                  `group flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[11px] font-medium transition-all cursor-pointer ${isActive
+                                    ? 'bg-indigo-600 text-white shadow-xs font-semibold'
+                                    : 'text-slate-400 hover:bg-slate-800 hover:text-white'
                                   }`
                                 }
                               >
@@ -825,20 +814,18 @@ export const Sidebar = ({
                       <button
                         type="button"
                         onClick={handleToggleSalesInvoice}
-                        className={`w-full group flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-all cursor-pointer ${
-                          isSalesInvoiceActive || isSalesInvMenuOpen
+                        className={`w-full group flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-all cursor-pointer ${isSalesInvoiceActive || isSalesInvMenuOpen
                             ? 'bg-slate-800 text-emerald-300'
                             : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
-                        }`}
+                          }`}
                       >
                         <div className="flex items-center gap-2">
                           <Receipt className="h-3.5 w-3.5 text-emerald-400" />
                           <span>Sales Invoice</span>
                         </div>
                         <ChevronDown
-                          className={`h-3 w-3 text-slate-400 transition-transform ${
-                            isSalesInvMenuOpen ? 'rotate-0' : '-rotate-90'
-                          }`}
+                          className={`h-3 w-3 text-slate-400 transition-transform ${isSalesInvMenuOpen ? 'rotate-0' : '-rotate-90'
+                            }`}
                         />
                       </button>
 
@@ -856,10 +843,9 @@ export const Sidebar = ({
                                   }
                                 }}
                                 className={({ isActive }) =>
-                                  `group flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[11px] font-medium transition-all cursor-pointer ${
-                                    isActive
-                                      ? 'bg-emerald-600 text-white shadow-xs font-semibold'
-                                      : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                                  `group flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[11px] font-medium transition-all cursor-pointer ${isActive
+                                    ? 'bg-emerald-600 text-white shadow-xs font-semibold'
+                                    : 'text-slate-400 hover:bg-slate-800 hover:text-white'
                                   }`
                                 }
                               >
@@ -872,28 +858,31 @@ export const Sidebar = ({
                       )}
                     </div>
 
-                    {/* 3. Tally Upload Direct Link */}
+                    {/* 3. Customer Receipts (Primary Payment Entry) */}
                     <div className="pt-1 border-t border-slate-800/80">
                       <NavLink
-                        to="/transaction/tally-upload"
+                        to="/transaction/receipts"
                         onClick={() => {
                           if (typeof window !== 'undefined' && window.innerWidth < 1024) {
                             handleClose();
                           }
                         }}
                         className={({ isActive }) =>
-                          `w-full group flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-all cursor-pointer ${
-                            isActive
-                              ? 'bg-amber-600 text-white shadow-xs'
-                              : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+                          `w-full group flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-all cursor-pointer ${isActive
+                            ? 'bg-indigo-600 text-white shadow-xs font-semibold'
+                            : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
                           }`
                         }
                       >
-                        <div className="flex items-center gap-2">
-                          <FileSpreadsheet className="h-3.5 w-3.5 text-amber-400" />
-                          <span>Tally Upload</span>
-                        </div>
-                       
+                        {({ isActive }) => (
+                          <div className="flex items-center gap-2">
+                            <Receipt
+                              className={`h-3.5 w-3.5 transition-colors ${isActive ? 'text-white' : 'text-indigo-400'
+                                }`}
+                            />
+                            <span>Customer Receipts</span>
+                          </div>
+                        )}
                       </NavLink>
                     </div>
 
@@ -907,39 +896,65 @@ export const Sidebar = ({
                           }
                         }}
                         className={({ isActive }) =>
-                          `w-full group flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-all cursor-pointer ${
+                          `w-full group flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-all cursor-pointer ${isActive
+                            ? 'bg-indigo-600 text-white shadow-xs font-semibold'
+                            : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+                          }`
+                        }
+                      >
+                        {({ isActive }) => (
+                          <div className="flex items-center gap-2">
+                            <PieChart
+                              className={`h-3.5 w-3.5 transition-colors ${isActive ? 'text-white' : 'text-indigo-400'
+                                }`}
+                            />
+                            <span>Customer Report</span>
+                          </div>
+                        )}
+                      </NavLink>
+                    </div>
+
+                    {/* 3.2 Tally Upload (Auditor Tool) */}
+                    {/* <div className="pt-1 border-t border-slate-800/80">
+                      <NavLink
+                        to="/transaction/tally-upload"
+                        onClick={() => {
+                          if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+                            handleClose();
+                          }
+                        }}
+                        className={({ isActive }) =>
+                          `w-full group flex items-center justify-between rounded-lg px-2.5 py-1 text-[11px] font-medium transition-all cursor-pointer ${
                             isActive
-                              ? 'bg-indigo-600 text-white shadow-xs'
-                              : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+                              ? 'bg-slate-800 text-amber-400 shadow-xs font-semibold'
+                              : 'text-slate-500 hover:bg-slate-800/40 hover:text-slate-300'
                           }`
                         }
                       >
                         <div className="flex items-center gap-2">
-                          <PieChart className="h-3.5 w-3.5 text-indigo-400" />
-                          <span>Customer Report</span>
+                          <FileSpreadsheet className="h-3 w-3 text-slate-500 group-hover:text-amber-400" />
+                          <span>Tally Upload (Auditor)</span>
                         </div>
                       </NavLink>
-                    </div>
+                    </div> */}
 
                     {/* 4. Office Expense Sub-Menu Treeview */}
                     <div className="space-y-1 pt-1 border-t border-slate-800/80">
                       <button
                         type="button"
                         onClick={handleToggleExpense}
-                        className={`w-full group flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-all cursor-pointer ${
-                          isOfficeExpenseActive || isExpenseMenuOpen
+                        className={`w-full group flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-all cursor-pointer ${isOfficeExpenseActive || isExpenseMenuOpen
                             ? 'bg-slate-800 text-rose-300'
                             : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
-                        }`}
+                          }`}
                       >
                         <div className="flex items-center gap-2">
                           <Wallet className="h-3.5 w-3.5 text-rose-400" />
                           <span>Office Expense</span>
                         </div>
                         <ChevronDown
-                          className={`h-3 w-3 text-slate-400 transition-transform ${
-                            isExpenseMenuOpen ? 'rotate-0' : '-rotate-90'
-                          }`}
+                          className={`h-3 w-3 text-slate-400 transition-transform ${isExpenseMenuOpen ? 'rotate-0' : '-rotate-90'
+                            }`}
                         />
                       </button>
 
@@ -957,10 +972,9 @@ export const Sidebar = ({
                                   }
                                 }}
                                 className={({ isActive }) =>
-                                  `group flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[11px] font-medium transition-all cursor-pointer ${
-                                    isActive
-                                      ? 'bg-rose-600 text-white shadow-xs font-semibold'
-                                      : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                                  `group flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[11px] font-medium transition-all cursor-pointer ${isActive
+                                    ? 'bg-rose-600 text-white shadow-xs font-semibold'
+                                    : 'text-slate-400 hover:bg-slate-800 hover:text-white'
                                   }`
                                 }
                               >
@@ -983,18 +997,16 @@ export const Sidebar = ({
                   type="button"
                   onClick={handleTransactionClick}
                   title="Transaction - Click to open"
-                  className={`group relative flex items-center justify-center p-3 rounded-xl transition-all cursor-pointer ${
-                    isTransactionActive
+                  className={`group relative flex items-center justify-center p-3 rounded-xl transition-all cursor-pointer ${isTransactionActive
                       ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
                       : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
-                  }`}
+                    }`}
                 >
                   <Repeat
-                    className={`h-5 w-5 shrink-0 ${
-                      isTransactionActive
+                    className={`h-5 w-5 shrink-0 ${isTransactionActive
                         ? 'text-white'
                         : 'text-slate-400 group-hover:text-slate-200'
-                    }`}
+                      }`}
                   />
 
                   {/* Active Indicator Dot */}

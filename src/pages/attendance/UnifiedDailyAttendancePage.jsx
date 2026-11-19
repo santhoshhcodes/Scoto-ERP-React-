@@ -24,9 +24,12 @@ import {
   CalendarDays,
   CheckSquare,
   Square,
+  Building2,
+  MapPin,
+  Home,
 } from 'lucide-react';
 import { StatCard, StatusBadge, Modal } from '../../components/common';
-import { exportDailyAttendanceExcel, exportToExcel } from '../../utils/excelUtils';
+import { exportDailyAttendanceExcel, exportToExcel, formatMinutesToHM } from '../../utils/excelUtils';
 import {
   useDailySummary,
   useBackendHealth,
@@ -34,6 +37,7 @@ import {
   useSaveLateFine,
   useDownloadDeviceLogs,
   useToggleOnSite,
+  useUpdateEmployeeShiftTiming,
 } from '../../api/attendanceApi';
 import RegularizeModal from './RegularizeModal';
 import HolidayManagementModal from './HolidayManagementModal';
@@ -70,6 +74,8 @@ export const UnifiedDailyAttendancePage = () => {
   const [fineAmountInput, setFineAmountInput] = useState('100');
   const [fineStatusInput, setFineStatusInput] = useState('CONFIRMED');
   const [permissionMinutesInput, setPermissionMinutesInput] = useState('0');
+  const [earlyPermissionMinutesInput, setEarlyPermissionMinutesInput] = useState('0');
+  const [assignedCheckoutInput, setAssignedCheckoutInput] = useState('19:30');
   const [fineReasonInput, setFineReasonInput] = useState('');
   const [enteredByInput, setEnteredByInput] = useState('');
   const [fineModalError, setFineModalError] = useState('');
@@ -88,7 +94,7 @@ export const UnifiedDailyAttendancePage = () => {
     return shiftSettings[empCode]?.checkoutTime || '19:30';
   };
 
-  const toggleEmployeeShift = (empCode, e) => {
+  const toggleEmployeeShift = async (empCode, e) => {
     if (e) e.stopPropagation();
     const current = getEmployeeCheckoutTime(empCode);
     const updated = current === '19:30' ? '18:45' : '19:30';
@@ -98,7 +104,15 @@ export const UnifiedDailyAttendancePage = () => {
     };
     setShiftSettings(nextSettings);
     localStorage.setItem('scoto_employee_shift_settings', JSON.stringify(nextSettings));
-    showToast(`Scheduled checkout for ${empCode} set to ${updated === '19:30' ? '07:30 PM (Standard)' : '06:45 PM (Special Shift)'}.`);
+    showToast(`Scheduled checkout for ${empCode} set to ${updated === '19:30' ? '07:30 PM (Regular Standard)' : '06:45 PM (Designated Shift)'}.`);
+    try {
+      await updateEmployeeShiftTimingMutation.mutateAsync({
+        employee_code: empCode,
+        shift_end_time: updated,
+      });
+    } catch (err) {
+      console.error('Failed to update employee shift timing on server:', err);
+    }
   };
 
   const showToast = (msg, type = 'success') => {
@@ -123,6 +137,7 @@ export const UnifiedDailyAttendancePage = () => {
 
   const saveDailyReviewMutation = useSaveDailyReview();
   const saveLateFineMutation = useSaveLateFine();
+  const updateEmployeeShiftTimingMutation = useUpdateEmployeeShiftTiming();
   const downloadLogsMutation = useDownloadDeviceLogs();
   const toggleOnSiteMutation = useToggleOnSite();
 
@@ -164,46 +179,61 @@ export const UnifiedDailyAttendancePage = () => {
       shiftStart.setHours(9, 30, 0, 0);
 
       if (perm > 0) {
+        // Morning Permission: 10m grace period DOES NOT apply.
+        // Cutoff is 09:30 AM + permission minutes. Any check-in after permitted time is late.
         const allowed = new Date(shiftStart.getTime() + perm * 60 * 1000);
         if (punch.getTime() <= allowed.getTime()) return 0;
         return Math.floor((punch.getTime() - allowed.getTime()) / (1000 * 60));
       } else {
+        // Morning Grace Period: 10-minute grace period up to 09:40 AM.
+        // Check-in up to 09:40 AM is on time.
+        // After 09:40 AM, late minutes calculated FROM 09:40 AM (e.g. 09:41 = 1m, 09:45 = 5m).
         const graceCutoff = new Date(shiftStart.getTime() + 10 * 60 * 1000); // 09:40 AM
         if (punch.getTime() <= graceCutoff.getTime()) return 0;
-        return Math.floor((punch.getTime() - shiftStart.getTime()) / (1000 * 60));
+        return Math.floor((punch.getTime() - graceCutoff.getTime()) / (1000 * 60));
       }
     } catch {
       return 0;
     }
-  };    
+  };
 
   // Compute early exit minutes helper
   const computeEarlyExit = (outIso, scheduledCheckout = '19:30', earlyPermMinutes = 0) => {
-    if (!outIso) return { isEarly: false, earlyMinutes: 0 };
+    if (!outIso) return { isEarly: false, earlyMinutes: 0, allowedExitStr: '' };
     try {
       const outDate = new Date(outIso);
-      if (isNaN(outDate.getTime())) return { isEarly: false, earlyMinutes: 0 };
+      if (isNaN(outDate.getTime())) return { isEarly: false, earlyMinutes: 0, allowedExitStr: '' };
 
-      // Crucial eSSL condition: If checkout is at or after 18:45 (06:45 PM), it is ON TIME (0 early exit)
+      const timeStr = typeof scheduledCheckout === 'string' ? scheduledCheckout : '19:30';
+      const [schedHours, schedMins] = timeStr.split(':').map(Number);
+      const schedTotalMins = (isNaN(schedHours) ? 19 : schedHours) * 60 + (isNaN(schedMins) ? 30 : schedMins);
+
       const outHours = outDate.getHours();
       const outMins = outDate.getMinutes();
-      if (outHours > 18 || (outHours === 18 && outMins >= 45)) {
-        return { isEarly: false, earlyMinutes: 0 };
+      const outTotalMins = outHours * 60 + outMins;
+
+      // Early permission offset:
+      // When early permission is granted (>0), calculate permitted checkout from actual office closing (18:30 / 6:30 PM = 1110 mins).
+      // e.g. 30m permission -> allowed exit from 18:00 (6:00 PM). Exits before 18:00 get early exit penalty.
+      // Without evening permission (=0): employees must follow assigned checkout time (19:30 or 18:45).
+      const permMins = Number(earlyPermMinutes) || 0;
+      const baseExitMins = permMins > 0 ? (18 * 60 + 30) : schedTotalMins;
+      const allowedExitMins = Math.max(0, baseExitMins - permMins);
+
+      const allowedH = Math.floor(allowedExitMins / 60);
+      const allowedM = allowedExitMins % 60;
+      const period = allowedH >= 12 ? 'PM' : 'AM';
+      const displayH = allowedH % 12 || 12;
+      const allowedExitStr = `${String(displayH).padStart(2, '0')}:${String(allowedM).padStart(2, '0')} ${period}`;
+
+      if (outTotalMins >= allowedExitMins) {
+        return { isEarly: false, earlyMinutes: 0, allowedExitStr };
       }
 
-      const [schedHours, schedMins] = (scheduledCheckout === '18:45' ? '18:45' : '18:45').split(':').map(Number);
-      const schedDate = new Date(outDate);
-      schedDate.setHours(schedHours, schedMins, 0, 0);
-
-      const effectiveSched = new Date(schedDate.getTime() - (Number(earlyPermMinutes) || 0) * 60 * 1000);
-
-      if (outDate.getTime() < effectiveSched.getTime()) {
-        const diffMinutes = Math.floor((effectiveSched.getTime() - outDate.getTime()) / (1000 * 60));
-        return { isEarly: diffMinutes > 0, earlyMinutes: diffMinutes };
-      }
-      return { isEarly: false, earlyMinutes: 0 };
+      const diffMinutes = allowedExitMins - outTotalMins;
+      return { isEarly: diffMinutes > 0, earlyMinutes: Math.max(0, diffMinutes), allowedExitStr };
     } catch {
-      return { isEarly: false, earlyMinutes: 0 };
+      return { isEarly: false, earlyMinutes: 0, allowedExitStr: '' };
     }
   };
 
@@ -230,6 +260,9 @@ export const UnifiedDailyAttendancePage = () => {
         r.status === 'ON_DUTY' ||
         r.status === 'ON_SITE' ||
         r.status === 'ON_FIELD' ||
+        r.status === 'WFH' ||
+        r.review_status === 'WFH' ||
+        r.status === 'WORK_FROM_HOME' ||
         r.is_on_site ||
         r.is_on_field
     ).length;
@@ -238,6 +271,23 @@ export const UnifiedDailyAttendancePage = () => {
       (r) => r.is_on_site || r.is_on_field || r.status === 'ON_SITE' || r.review_status === 'ON_SITE'
     ).length;
 
+    const wfhCount = attendanceRecords.filter(
+      (r) => r.status === 'WFH' || r.review_status === 'WFH' || r.status === 'WORK_FROM_HOME'
+    ).length;
+
+    const onDutyCount = attendanceRecords.filter(
+      (r) => r.status === 'ON_DUTY' || r.review_status === 'ON_DUTY'
+    ).length;
+
+    const earlyExitCount = attendanceRecords.filter((rec) => {
+      if (!rec.last_out || rec.status === 'WFH' || rec.review_status === 'WFH' || rec.status === 'ON_DUTY' || rec.review_status === 'ON_DUTY' || rec.is_on_site || rec.is_on_field || rec.is_holiday || rec.is_weekly_off) {
+        return false;
+      }
+      const sched = getEmployeeCheckoutTime(rec.employee_code);
+      const earlyInfo = computeEarlyExit(rec.last_out, sched, rec.early_permission_minutes);
+      return rec.early_exit_minutes > 0 || earlyInfo.isEarly;
+    }).length;
+
     const actionNeeded = attendanceRecords.filter((rec) => {
       const isMissingInPunch = !rec.first_in;
       const isMissingOutPunch = !rec.last_out || rec.last_out === rec.first_in;
@@ -245,8 +295,11 @@ export const UnifiedDailyAttendancePage = () => {
       const isLateUnexcused = rec.first_in && rec.late_minutes > 0 && rec.fine_status !== 'WAIVED' && rec.fine_status !== 'CONFIRMED';
       const isNotReviewed = !rec.review_status;
       const isOnSite = Boolean(rec.is_on_site || rec.is_on_field || rec.status === 'ON_SITE');
-      const isExempt = rec.status === 'ON_LEAVE' || rec.status === 'COMP_OFF' || rec.status === 'LOP' || rec.status === 'ON_DUTY' || rec.is_holiday || rec.is_weekly_off;
-      return (isMissingInPunch || isMissingOutPunch || isLateUnexcused || isSinglePunch || isOnSite) && isNotReviewed && !isExempt;
+      const isExempt = rec.status === 'ON_LEAVE' || rec.status === 'COMP_OFF' || rec.status === 'LOP' || rec.status === 'ON_DUTY' || rec.status === 'WFH' || rec.review_status === 'WFH' || rec.status === 'WORK_FROM_HOME' || rec.is_holiday || rec.is_weekly_off;
+      const sched = getEmployeeCheckoutTime(rec.employee_code);
+      const earlyInfo = computeEarlyExit(rec.last_out, sched, rec.early_permission_minutes);
+      const isEarlyUnexcused = rec.last_out && (rec.early_exit_minutes > 0 || earlyInfo.isEarly) && rec.fine_status !== 'WAIVED' && rec.fine_status !== 'CONFIRMED';
+      return (isMissingInPunch || isMissingOutPunch || isLateUnexcused || isEarlyUnexcused || isSinglePunch || isOnSite) && isNotReviewed && !isExempt;
     }).length;
 
     const leavesAndLop = attendanceRecords.filter(
@@ -262,12 +315,15 @@ export const UnifiedDailyAttendancePage = () => {
       present,
       actionNeeded,
       onSiteCount,
+      wfhCount,
+      onDutyCount,
+      earlyExitCount,
       leavesAndLop,
       lateCount,
       confirmedFines,
       waivedFines,
     };
-  }, [attendanceRecords]);
+  }, [attendanceRecords, shiftSettings]);
 
   // Filtered Records
   const filteredRecords = useMemo(() => {
@@ -283,7 +339,12 @@ export const UnifiedDailyAttendancePage = () => {
         String(rec.employee_code || '').toLowerCase().includes(cleanSearch) ||
         String(rec.essl_employee_code || '').toLowerCase().includes(cleanSearch);
 
-      const matchesStatus = !statusFilter || rec.status === statusFilter;
+      const matchesStatus =
+        !statusFilter ||
+        rec.status === statusFilter ||
+        rec.review_status === statusFilter ||
+        (statusFilter === 'WFH' && (rec.status === 'WORK_FROM_HOME' || rec.review_status === 'WFH')) ||
+        (statusFilter === 'ON_SITE' && (rec.is_on_site || rec.is_on_field || rec.status === 'ON_SITE' || rec.review_status === 'ON_SITE'));
 
       const matchesDevice =
         deviceFilter === 'ALL' ||
@@ -299,10 +360,21 @@ export const UnifiedDailyAttendancePage = () => {
         const isLateUnexcused = rec.first_in && rec.late_minutes > 0 && rec.fine_status !== 'WAIVED' && rec.fine_status !== 'CONFIRMED';
         const isNotReviewed = !rec.review_status;
         const isOnSite = Boolean(rec.is_on_site || rec.is_on_field || rec.status === 'ON_SITE');
-        const isExempt = rec.status === 'ON_LEAVE' || rec.status === 'COMP_OFF' || rec.status === 'LOP' || rec.status === 'ON_DUTY' || rec.is_holiday || rec.is_weekly_off;
-        matchesTab = (isMissingInPunch || isMissingOutPunch || isLateUnexcused || isSinglePunch || isOnSite) && isNotReviewed && !isExempt;
+        const isExempt = rec.status === 'ON_LEAVE' || rec.status === 'COMP_OFF' || rec.status === 'LOP' || rec.status === 'ON_DUTY' || rec.status === 'WFH' || rec.review_status === 'WFH' || rec.status === 'WORK_FROM_HOME' || rec.is_holiday || rec.is_weekly_off;
+        const sched = getEmployeeCheckoutTime(rec.employee_code);
+        const earlyInfo = computeEarlyExit(rec.last_out, sched, rec.early_permission_minutes);
+        const isEarlyUnexcused = rec.last_out && (rec.early_exit_minutes > 0 || earlyInfo.isEarly) && rec.fine_status !== 'WAIVED' && rec.fine_status !== 'CONFIRMED';
+        matchesTab = (isMissingInPunch || isMissingOutPunch || isLateUnexcused || isEarlyUnexcused || isSinglePunch || isOnSite) && isNotReviewed && !isExempt;
       } else if (activeTab === 'ON_SITE') {
         matchesTab = Boolean(rec.is_on_site || rec.is_on_field || rec.status === 'ON_SITE' || rec.review_status === 'ON_SITE');
+      } else if (activeTab === 'WFH') {
+        matchesTab = Boolean(rec.status === 'WFH' || rec.review_status === 'WFH' || rec.status === 'WORK_FROM_HOME');
+      } else if (activeTab === 'ON_DUTY') {
+        matchesTab = Boolean(rec.status === 'ON_DUTY' || rec.review_status === 'ON_DUTY');
+      } else if (activeTab === 'EARLY_EXIT') {
+        const sched = getEmployeeCheckoutTime(rec.employee_code);
+        const earlyInfo = computeEarlyExit(rec.last_out, sched, rec.early_permission_minutes);
+        matchesTab = Boolean(rec.last_out && (rec.early_exit_minutes > 0 || earlyInfo.isEarly));
       } else if (activeTab === 'PRESENT') {
         matchesTab = Boolean(
           rec.first_in ||
@@ -312,6 +384,9 @@ export const UnifiedDailyAttendancePage = () => {
           rec.status === 'ON_DUTY' ||
           rec.status === 'ON_SITE' ||
           rec.status === 'ON_FIELD' ||
+          rec.status === 'WFH' ||
+          rec.review_status === 'WFH' ||
+          rec.status === 'WORK_FROM_HOME' ||
           rec.is_on_site ||
           rec.is_on_field
         );
@@ -328,7 +403,7 @@ export const UnifiedDailyAttendancePage = () => {
 
       return matchesSearch && matchesStatus && matchesDevice && matchesTab;
     });
-  }, [attendanceRecords, searchTerm, statusFilter, deviceFilter, activeTab]);
+  }, [attendanceRecords, searchTerm, statusFilter, deviceFilter, activeTab, shiftSettings]);
 
   // Handle Review Submission (from RegularizeModal)
   const handleReviewSubmit = async (payload) => {
@@ -390,31 +465,74 @@ export const UnifiedDailyAttendancePage = () => {
     }
   };
 
-  // Handle permission offset input changes and chip button clicks dynamically
-  const handlePermissionChange = (val) => {
-    setPermissionMinutesInput(val);
-    const perm = Number(val) || 0;
-    if (selectedFineRecord?.first_in) {
-      const late = computeLateMinutes(selectedFineRecord.first_in, perm);
-      if (late === 0) {
-        setFineStatusInput('WAIVED');
-        setFineAmountInput('0');
-      } else {
-        if (fineStatusInput === 'WAIVED') {
-          setFineStatusInput('CONFIRMED');
-          setFineAmountInput(selectedFineRecord.fine_amount ? String(selectedFineRecord.fine_amount) : '100');
-        }
-      }
+  // Dynamic fine state recomputation based on late perm, early perm, and assigned closing time
+  const recomputeFineState = (latePermVal, earlyPermVal, closingVal) => {
+    if (!selectedFineRecord) return;
+    const latePerm = Number(latePermVal) || 0;
+    const earlyPerm = Number(earlyPermVal) || 0;
+    const closing = closingVal || '19:30';
+
+    const late = selectedFineRecord.first_in
+      ? computeLateMinutes(selectedFineRecord.first_in, latePerm)
+      : 0;
+    const earlyInfo = selectedFineRecord.last_out
+      ? computeEarlyExit(selectedFineRecord.last_out, closing, earlyPerm)
+      : { earlyMinutes: 0 };
+    const early = earlyInfo.earlyMinutes;
+
+    if (late === 0 && early === 0) {
+      setFineStatusInput('WAIVED');
+      setFineAmountInput('0');
+    } else if (fineStatusInput === 'WAIVED' && (late > 0 || early > 0)) {
+      setFineStatusInput('CONFIRMED');
+      setFineAmountInput(selectedFineRecord.fine_amount ? String(selectedFineRecord.fine_amount) : '100');
     }
+  };
+
+  const handleLatePermissionChange = (val) => {
+    setPermissionMinutesInput(val);
+    recomputeFineState(val, earlyPermissionMinutesInput, assignedCheckoutInput);
+  };
+
+  const handleEarlyPermissionChange = (val) => {
+    setEarlyPermissionMinutesInput(val);
+    recomputeFineState(permissionMinutesInput, val, assignedCheckoutInput);
+  };
+
+  const handleAssignedCheckoutChange = (val) => {
+    setAssignedCheckoutInput(val);
+    recomputeFineState(permissionMinutesInput, earlyPermissionMinutesInput, val);
   };
 
   // Open Inline Fine Modal
   const openFineModal = (rec) => {
     setSelectedFineRecord(rec);
-    setPermissionMinutesInput(String(rec.permission_minutes || 0));
-    setFineAmountInput(rec.fine_amount ? String(rec.fine_amount) : '100');
-    setFineStatusInput(rec.fine_status === 'WAIVED' ? 'WAIVED' : 'CONFIRMED');
-    setFineReasonInput(rec.fine_reason || '');
+    const initialLatePerm = rec.permission_minutes || 0;
+    const initialEarlyPerm = rec.early_permission_minutes || 0;
+    const initialClosing = rec.scheduled_checkout
+      ? String(rec.scheduled_checkout).slice(0, 5)
+      : getEmployeeCheckoutTime(rec.employee_code);
+
+    setPermissionMinutesInput(String(initialLatePerm));
+    setEarlyPermissionMinutesInput(String(initialEarlyPerm));
+    setAssignedCheckoutInput(initialClosing || '19:30');
+
+    const late = rec.first_in ? computeLateMinutes(rec.first_in, initialLatePerm) : 0;
+    const earlyInfo = rec.last_out
+      ? computeEarlyExit(rec.last_out, initialClosing || '19:30', initialEarlyPerm)
+      : { earlyMinutes: 0 };
+    const early = rec.early_exit_minutes || earlyInfo.earlyMinutes || 0;
+
+    const hasViolation = late > 0 || early > 0;
+    if (!hasViolation) {
+      setFineStatusInput('WAIVED');
+      setFineAmountInput('0');
+    } else {
+      setFineStatusInput(rec.fine_status === 'WAIVED' ? 'WAIVED' : 'CONFIRMED');
+      setFineAmountInput(rec.fine_amount ? String(rec.fine_amount) : '100');
+    }
+
+    setFineReasonInput(rec.fine_reason || rec.review_reason || '');
     setFineModalError('');
   };
 
@@ -424,13 +542,32 @@ export const UnifiedDailyAttendancePage = () => {
     if (!selectedFineRecord) return;
     setFineModalError('');
 
-    const permMins = Number(permissionMinutesInput) || 0;
-    const computedLate = selectedFineRecord.first_in
-      ? computeLateMinutes(selectedFineRecord.first_in, permMins)
-      : 0;
+    const latePerm = Number(permissionMinutesInput) || 0;
+    const earlyPerm = Number(earlyPermissionMinutesInput) || 0;
+    const closingTime = assignedCheckoutInput || '19:30';
 
-    const finalStatus = computedLate === 0 ? 'WAIVED' : (fineStatusInput === 'WAIVED' ? 'WAIVED' : 'CONFIRMED');
-    const finalAmount = finalStatus === 'WAIVED' || computedLate === 0 ? 0 : Number(fineAmountInput);
+    const computedLate = selectedFineRecord.first_in
+      ? computeLateMinutes(selectedFineRecord.first_in, latePerm)
+      : 0;
+    const earlyInfo = selectedFineRecord.last_out
+      ? computeEarlyExit(selectedFineRecord.last_out, closingTime, earlyPerm)
+      : { earlyMinutes: 0 };
+    const computedEarly = earlyInfo.earlyMinutes;
+
+    let fineType = 'LATE_ARRIVAL';
+    if (computedLate > 0 && computedEarly > 0) {
+      fineType = 'BOTH';
+    } else if (computedEarly > 0) {
+      fineType = 'EARLY_EXIT';
+    } else if (computedLate > 0) {
+      fineType = 'LATE_ARRIVAL';
+    } else {
+      fineType = 'NONE';
+    }
+
+    const hasViolations = computedLate > 0 || computedEarly > 0;
+    const finalStatus = !hasViolations ? 'WAIVED' : (fineStatusInput === 'WAIVED' ? 'WAIVED' : 'CONFIRMED');
+    const finalAmount = finalStatus === 'WAIVED' || !hasViolations ? 0 : Number(fineAmountInput);
 
     if (finalStatus === 'CONFIRMED' && (!finalAmount || Number(finalAmount) <= 0)) {
       setFineModalError('Please specify a valid fine amount (INR) before confirming.');
@@ -438,25 +575,46 @@ export const UnifiedDailyAttendancePage = () => {
     }
 
     try {
+      // 1. Sync employee individually assigned closing time to state & database if changed
+      const prevClosing = getEmployeeCheckoutTime(selectedFineRecord.employee_code);
+      if (closingTime !== prevClosing) {
+        const nextSettings = {
+          ...shiftSettings,
+          [selectedFineRecord.employee_code]: { checkoutTime: closingTime },
+        };
+        setShiftSettings(nextSettings);
+        localStorage.setItem('scoto_employee_shift_settings', JSON.stringify(nextSettings));
+        await updateEmployeeShiftTimingMutation.mutateAsync({
+          employee_code: selectedFineRecord.employee_code,
+          shift_end_time: closingTime,
+        });
+      }
+
+      // 2. Persist Unified Late Fine & Early Exit assessment record
       await saveLateFineMutation.mutateAsync({
         employee_code: selectedFineRecord.employee_code,
         attendance_date: selectedFineRecord.target_date || selectedDate,
         actual_check_in: selectedFineRecord.first_in || null,
         shift_start_time: selectedFineRecord.shift_start_time || '09:30',
         allowed_until: selectedFineRecord.allowed_until || null,
-        permission_minutes_applied: permMins,
+        permission_minutes_applied: latePerm,
+        actual_check_out: selectedFineRecord.last_out || null,
+        shift_end_time: closingTime,
+        early_exit_minutes: computedEarly,
+        early_permission_minutes: earlyPerm,
+        fine_type: fineType,
         late_minutes: computedLate,
         fine_amount: finalAmount,
         fine_status: finalStatus,
-        reason: fineReasonInput.trim() || (permMins > 0 ? `Manual permission applied (${permMins} mins)` : undefined),
+        reason: fineReasonInput.trim() || undefined,
         entered_by: enteredByInput.trim() || 'HR Operator',
       });
 
       setSelectedFineRecord(null);
-      showToast(`Late fine adjustment confirmed for ${selectedFineRecord.employee_code}.`);
+      showToast(`Fine & exit assessment saved for ${selectedFineRecord.employee_code}.`);
       refetch();
     } catch (err) {
-      setFineModalError(err.message || 'Failed to persist late fine adjustment.');
+      setFineModalError(err.message || 'Failed to persist penalty adjustment.');
     }
   };
 
@@ -468,9 +626,9 @@ export const UnifiedDailyAttendancePage = () => {
     }
     const data = filteredRecords.map((row, idx) => {
       const mins = row.total_minutes || 0;
-      const hrs = Math.floor(mins / 60);
-      const rem = mins % 60;
-      const workDuration = hrs > 0 || rem > 0 ? `${hrs}h ${rem}m` : '0m';
+      const workDuration = formatMinutesToHM(mins, '0m');
+      const earlyInfo = computeEarlyExit(row.last_out, getEmployeeCheckoutTime(row.employee_code), row.early_permission_minutes);
+      const earlyMins = row.early_exit_minutes || earlyInfo.earlyMinutes || 0;
 
       return {
         'S.No': idx + 1,
@@ -480,10 +638,11 @@ export const UnifiedDailyAttendancePage = () => {
         'Punch In': row.first_in ? formatTimeOnly(row.first_in) : (row.last_out ? 'Missing IN' : 'Not Punched'),
         'Punch Out': row.last_out ? formatTimeOnly(row.last_out) : (row.first_in ? 'Missing Out' : '--:--'),
         'Duration': workDuration,
-        'Late (Mins)': row.late_minutes || 0,
-        'Early Exit (Mins)': row.early_exit_minutes || 0,
-        'Permission (Mins)': row.permission_minutes || 0,
-        'Status': row.status,
+        'Late Duration': row.late_minutes ? formatMinutesToHM(row.late_minutes) : '0m',
+        'Early Exit': earlyMins > 0 ? formatMinutesToHM(earlyMins) : '0m',
+        'Late Permission': row.permission_minutes ? formatMinutesToHM(row.permission_minutes) : '0m',
+        'Early Permission': row.early_permission_minutes ? formatMinutesToHM(row.early_permission_minutes) : '0m',
+        'Status': row.review_status === 'WFH' ? 'WFH' : row.status,
         'Fine Status': row.fine_status || 'NONE',
         'Fine (INR)': row.fine_amount || 0,
         'Confirmation': row.review_status || 'Automated',
@@ -499,11 +658,10 @@ export const UnifiedDailyAttendancePage = () => {
       {/* Toast Notification */}
       {toastMessage && (
         <div
-          className={`flex items-center justify-between rounded-xl border p-4 text-xs font-semibold shadow-xs animate-in fade-in ${
-            toastType === 'error'
-              ? 'border-rose-200 bg-rose-50 text-rose-800'
-              : 'border-emerald-200 bg-emerald-50 text-emerald-800'
-          }`}
+          className={`flex items-center justify-between rounded-xl border p-4 text-xs font-semibold shadow-xs animate-in fade-in ${toastType === 'error'
+            ? 'border-rose-200 bg-rose-50 text-rose-800'
+            : 'border-emerald-200 bg-emerald-50 text-emerald-800'
+            }`}
         >
           <div className="flex items-center gap-2">
             {toastType === 'error' ? (
@@ -638,32 +796,33 @@ export const UnifiedDailyAttendancePage = () => {
       {/* Filter Tabs Bar */}
       <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 pb-2">
         {[
-          { id: 'ACTION_NEEDED', label: 'Action Needed (Daily Review)', count: stats.actionNeeded, alert: stats.actionNeeded > 0 },
+          { id: 'ACTION_NEEDED', label: 'Action Needed', count: stats.actionNeeded, alert: stats.actionNeeded > 0 },
           { id: 'ON_SITE', label: 'On-Site Staff', count: stats.onSiteCount },
-          { id: 'ALL', label: 'All Staff', count: stats.total },
+          { id: 'WFH', label: 'WFH (Remote)', count: stats.wfhCount },
+          { id: 'ON_DUTY', label: 'On Duty (OD)', count: stats.onDutyCount },
+          { id: 'EARLY_EXIT', label: 'Early Exit', count: stats.earlyExitCount, alert: stats.earlyExitCount > 0 },
           { id: 'PRESENT', label: 'Present Staff', count: stats.present },
-          { id: 'LEAVE_LOP', label: 'Leaves & LOP', count: stats.leavesAndLop },
           { id: 'LATE_FINES', label: 'Late & Fines', count: stats.lateCount },
+          { id: 'LEAVE_LOP', label: 'Leaves & LOP', count: stats.leavesAndLop },
+          { id: 'ALL', label: 'All Staff', count: stats.total },
         ].map((tab) => (
           <button
             key={tab.id}
             type="button"
             onClick={() => setActiveTab(tab.id)}
-            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold cursor-pointer transition-all ${
-              activeTab === tab.id
-                ? 'bg-indigo-600 text-white shadow-xs'
-                : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
-            }`}
+            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold cursor-pointer transition-all ${activeTab === tab.id
+              ? 'bg-indigo-600 text-white shadow-xs'
+              : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+              }`}
           >
             <span>{tab.label}</span>
             <span
-              className={`rounded-full px-1.5 py-0.2 text-[10px] font-bold ${
-                activeTab === tab.id
-                  ? 'bg-indigo-700 text-white'
-                  : tab.alert
-                    ? 'bg-amber-100 text-amber-800'
-                    : 'bg-slate-100 text-slate-600'
-              }`}
+              className={`rounded-full px-1.5 py-0.2 text-[10px] font-bold ${activeTab === tab.id
+                ? 'bg-indigo-700 text-white'
+                : tab.alert
+                  ? 'bg-amber-100 text-amber-800'
+                  : 'bg-slate-100 text-slate-600'
+                }`}
             >
               {tab.count}
             </span>
@@ -693,11 +852,10 @@ export const UnifiedDailyAttendancePage = () => {
               setSelectedDate(yesterdayStr);
               setActiveTab('ACTION_NEEDED');
             }}
-            className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold cursor-pointer transition-colors shadow-2xs ${
-              selectedDate === yesterdayStr
-                ? 'bg-indigo-600 text-white border-indigo-600'
-                : 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'
-            }`}
+            className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold cursor-pointer transition-colors shadow-2xs ${selectedDate === yesterdayStr
+              ? 'bg-indigo-600 text-white border-indigo-600'
+              : 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'
+              }`}
             title="Review Previous Day completed punches & anomalies"
           >
             ← Previous Day (Review)
@@ -706,11 +864,10 @@ export const UnifiedDailyAttendancePage = () => {
           <button
             type="button"
             onClick={() => setSelectedDate(todayStr)}
-            className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold cursor-pointer transition-colors shadow-2xs ${
-              selectedDate === todayStr
-                ? 'bg-slate-800 text-white border-slate-800'
-                : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-            }`}
+            className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold cursor-pointer transition-colors shadow-2xs ${selectedDate === todayStr
+              ? 'bg-slate-800 text-white border-slate-800'
+              : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+              }`}
             title="View today's live ongoing attendance"
           >
             Today (Live)
@@ -725,8 +882,10 @@ export const UnifiedDailyAttendancePage = () => {
             <option value="">All Statuses</option>
             <option value="PRESENT_CONFIRMED">Present (Confirmed)</option>
             <option value="FULL_DAY">Full Day (8h+)</option>
+            <option value="WFH">Work From Home (WFH)</option>
+            <option value="ON_DUTY">On Duty (OD)</option>
+            <option value="ON_SITE">On-Site Staff</option>
             <option value="HALF_DAY">Half Day</option>
-            <option value="ON_DUTY">On Duty</option>
             <option value="ON_LEAVE">Casual Leave (CL)</option>
             <option value="LOP">Loss of Pay (LOP)</option>
             <option value="SINGLE_PUNCH_ANOMALY">Missing Out Punch</option>
@@ -817,9 +976,8 @@ export const UnifiedDailyAttendancePage = () => {
                         <div className="flex items-center gap-1.5 text-[11px] text-slate-500 font-mono mt-0.5">
                           <span>{rec.employee_code}</span>
                           <span>•</span>
-                          <span className={`text-[10px] font-semibold px-1 rounded ${
-                            rec.essl_linked ? 'bg-indigo-50 text-indigo-700' : 'bg-slate-100 text-slate-600'
-                          }`}>
+                          <span className={`text-[10px] font-semibold px-1 rounded ${rec.essl_linked ? 'bg-indigo-50 text-indigo-700' : 'bg-slate-100 text-slate-600'
+                            }`}>
                             {rec.essl_linked ? 'eSSL Face' : 'Manual'}
                           </span>
                         </div>
@@ -834,16 +992,24 @@ export const UnifiedDailyAttendancePage = () => {
                               <span>{formatTimeOnly(rec.first_in)}</span>
                             </div>
                             {rec.late_minutes > 0 && (
-                              <span className={`text-[10px] font-bold block mt-0.5 ${
-                                isFined ? 'text-rose-700' : isWaived ? 'text-emerald-700' : 'text-amber-700'
-                              }`}>
-                                Late: {rec.late_minutes}m {isWaived ? '(Waived)' : ''}
+                              <span className={`text-[10px] font-bold block mt-0.5 ${isFined ? 'text-rose-700' : isWaived ? 'text-emerald-700' : 'text-amber-700'
+                                }`}>
+                                Late: {formatMinutesToHM(rec.late_minutes)} {isWaived ? '(Waived)' : ''}
                               </span>
                             )}
                           </div>
                         ) : (rec.is_on_site ?? rec.is_on_field) ? (
                           <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
                             On-Site Duty
+                          </span>
+                        ) : rec.status === 'WFH' || rec.review_status === 'WFH' ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-cyan-700 bg-cyan-50 px-2 py-0.5 rounded border border-cyan-200">
+                            <Home className="h-3 w-3 text-cyan-600" />
+                            WFH (Remote)
+                          </span>
+                        ) : (rec.status === 'ON_DUTY' || rec.review_status === 'ON_DUTY') && !rec.first_in ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                            On Duty (OD)
                           </span>
                         ) : rec.last_out ? (
                           <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200" title="Only Checkout punch was recorded in evening">
@@ -865,6 +1031,10 @@ export const UnifiedDailyAttendancePage = () => {
                           </div>
                         ) : (rec.is_on_site ?? rec.is_on_field) ? (
                           <span className="text-[11px] text-emerald-700 font-medium">On-Site</span>
+                        ) : rec.status === 'WFH' || rec.review_status === 'WFH' ? (
+                          <span className="text-[11px] text-cyan-700 font-medium">WFH (Remote)</span>
+                        ) : (rec.status === 'ON_DUTY' || rec.review_status === 'ON_DUTY') ? (
+                          <span className="text-[11px] text-blue-700 font-medium">On Duty</span>
                         ) : rec.first_in ? (
                           <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200" title="Morning IN recorded, evening OUT punch missing">
                             Missing Out
@@ -880,11 +1050,10 @@ export const UnifiedDailyAttendancePage = () => {
                           type="button"
                           onClick={(e) => toggleEmployeeShift(rec.employee_code, e)}
                           title="Click to toggle between 7:30 PM (Standard) and 6:45 PM (Special Shift)"
-                          className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold border cursor-pointer transition-colors ${
-                            isSpecialShift
-                              ? 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100'
-                              : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                          }`}
+                          className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold border cursor-pointer transition-colors ${isSpecialShift
+                            ? 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100'
+                            : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                            }`}
                         >
                           <Clock className="h-3 w-3" />
                           <span>{isSpecialShift ? '06:45' : '07:30'}</span>
@@ -902,8 +1071,20 @@ export const UnifiedDailyAttendancePage = () => {
                           <span className="inline-flex items-center gap-1 text-[10px] font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
                             Weekly Off
                           </span>
-                        ) : (rec.is_on_site ?? rec.is_on_field) ? (
-                          <span className="text-slate-400 text-[11px]">—</span>
+                        ) : (rec.is_on_site ?? rec.is_on_field) || rec.status === 'ON_SITE' || rec.review_status === 'ON_SITE' ? (
+                          <span className="text-sky-700 text-[10px] font-bold bg-sky-50 px-2 py-0.5 rounded border border-sky-200">
+                            On-Site
+                          </span>
+                        ) : rec.status === 'ON_DUTY' || rec.review_status === 'ON_DUTY' ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200" title="On duty client visit (Early exit excused)">
+                            <ShieldCheck className="h-2.5 w-2.5 text-blue-600" />
+                            OD (Excused)
+                          </span>
+                        ) : rec.status === 'WFH' || rec.review_status === 'WFH' ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-cyan-700 bg-cyan-50 px-2 py-0.5 rounded border border-cyan-200" title="Work from home (Remote full day)">
+                            <Home className="h-2.5 w-2.5 text-cyan-600" />
+                            WFH (Excused)
+                          </span>
                         ) : !rec.last_out ? (
                           /* Out punch not inserted -> DO NOT calculate early exit! */
                           <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200" title="Out punch was not inserted">
@@ -918,13 +1099,13 @@ export const UnifiedDailyAttendancePage = () => {
                             if (isEarly) {
                               return (
                                 <div>
-                                  <span className="inline-flex items-center gap-1 rounded bg-amber-100 px-2 py-0.5 text-[11px] font-extrabold text-amber-900 border border-amber-300 shadow-2xs">
-                                    <AlertTriangle className="h-3 w-3 text-amber-700" />
-                                    Early: {earlyMins}m
+                                  <span className="inline-flex items-center gap-1 rounded bg-rose-100 px-2 py-0.5 text-[11px] font-extrabold text-rose-900 border border-rose-300 shadow-2xs">
+                                    <AlertTriangle className="h-3 w-3 text-rose-700" />
+                                    Early: {formatMinutesToHM(earlyMins)}
                                   </span>
                                   {rec.early_permission_minutes > 0 && (
                                     <span className="text-[10px] font-semibold text-purple-700 block mt-0.5">
-                                      Permitted (-{rec.early_permission_minutes}m)
+                                      Permitted (-{formatMinutesToHM(rec.early_permission_minutes)})
                                     </span>
                                   )}
                                 </div>
@@ -942,7 +1123,7 @@ export const UnifiedDailyAttendancePage = () => {
 
                       {/* Work Duration */}
                       <td className="px-2.5 py-3 text-center font-semibold text-slate-800 whitespace-nowrap">
-                        {rec.total_minutes ? `${Math.floor(rec.total_minutes / 60)}h ${rec.total_minutes % 60}m` : '--'}
+                        {rec.total_minutes ? formatMinutesToHM(rec.total_minutes) : '--'}
                       </td>
 
                       {/* Status */}
@@ -961,7 +1142,9 @@ export const UnifiedDailyAttendancePage = () => {
                             status={
                               rec.review_status === 'HALF_DAY'
                                 ? rec.review_category || 'HALF_DAY'
-                                : rec.status
+                                : rec.review_status === 'WFH'
+                                  ? 'WFH'
+                                  : rec.status
                             }
                             size="sm"
                           />
@@ -982,11 +1165,21 @@ export const UnifiedDailyAttendancePage = () => {
                           </span>
                         ) : rec.late_minutes > 0 ? (
                           <span className="inline-flex items-center gap-1 rounded bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-800 border border-amber-300">
-                            Late: {rec.late_minutes}m
+                            Late: {formatMinutesToHM(rec.late_minutes)}
                           </span>
-                        ) : (
-                          <span className="text-slate-400 text-[11px]">On Time</span>
-                        )}
+                        ) : (() => {
+                          const earlyInfo = computeEarlyExit(rec.last_out, checkoutSched, rec.early_permission_minutes);
+                          const earlyMins = rec.early_exit_minutes || earlyInfo.earlyMinutes;
+                          if (earlyMins > 0 && rec.status !== 'WFH' && rec.review_status !== 'WFH' && rec.status !== 'ON_DUTY' && rec.review_status !== 'ON_DUTY') {
+                            return (
+                              <span className="inline-flex items-center gap-1 rounded bg-rose-50 px-2 py-0.5 text-[11px] font-bold text-rose-800 border border-rose-300">
+                                <AlertTriangle className="h-3 w-3 text-rose-600" />
+                                Early: {formatMinutesToHM(earlyMins)}
+                              </span>
+                            );
+                          }
+                          return <span className="text-slate-400 text-[11px]">On Time</span>;
+                        })()}
                       </td>
 
                       {/* Confirmation / Review Status */}
@@ -997,23 +1190,38 @@ export const UnifiedDailyAttendancePage = () => {
                               <CheckCircle2 className="h-3 w-3 text-emerald-600" />
                               {rec.review_status === 'PRESENT_CONFIRMED'
                                 ? 'Present'
-                                : rec.review_status === 'ON_SITE'
-                                  ? 'On-Site'
-                                  : rec.review_status === 'HALF_DAY'
-                                    ? 'Half Day'
-                                    : rec.review_status === 'ON_LEAVE'
-                                      ? 'CL'
-                                      : rec.review_status === 'LOP'
-                                        ? 'LOP'
-                                        : rec.review_status === 'ON_DUTY'
-                                          ? 'On Duty'
-                                          : rec.review_status}
+                                : rec.review_status === 'WFH' || rec.review_status === 'WORK_FROM_HOME'
+                                  ? 'WFH (Remote)'
+                                  : rec.review_status === 'ON_SITE'
+                                    ? 'On-Site'
+                                    : rec.review_status === 'HALF_DAY'
+                                      ? 'Half Day'
+                                      : rec.review_status === 'ON_LEAVE'
+                                        ? 'CL'
+                                        : rec.review_status === 'LOP'
+                                          ? 'LOP'
+                                          : rec.review_status === 'ON_DUTY'
+                                            ? 'On Duty'
+                                            : rec.review_status}
                             </span>
-                            {rec.review_reason && (
+                            {rec.client_name ? (
+                              <div
+                                className="mt-1 inline-flex items-center gap-1 rounded bg-sky-50 px-1.5 py-0.5 text-[10px] font-semibold text-sky-800 border border-sky-200"
+                                title={`${rec.client_name}${rec.place_of_visit ? ` • ${rec.place_of_visit}` : ''}`}
+                              >
+                                <Building2 className="h-2.5 w-2.5 text-sky-600 shrink-0" />
+                                <span className="truncate max-w-[120px]">{rec.client_name}</span>
+                                {rec.place_of_visit && (
+                                  <span className="text-sky-600 font-normal truncate max-w-[70px]">
+                                    • {rec.place_of_visit}
+                                  </span>
+                                )}
+                              </div>
+                            ) : rec.review_reason ? (
                               <div className="text-[10px] text-slate-500 truncate max-w-[120px]" title={rec.review_reason}>
                                 {rec.review_reason}
                               </div>
-                            )}
+                            ) : null}
                           </div>
                         ) : (
                           <span className="text-slate-400 italic text-[11px]">Auto Log</span>
@@ -1034,48 +1242,56 @@ export const UnifiedDailyAttendancePage = () => {
                             <span>Regularize</span>
                           </button>
 
-                          {/* 2. Fast 1-Click Waive & Fine Shortcuts for Unprocessed Late Arrivals */}
-                          {rec.first_in && rec.late_minutes > 0 && !isFined && !isWaived ? (
-                            <>
-                              <button
-                                type="button"
-                                onClick={(e) => handleQuickWaive(rec, e)}
-                                title="1-Click Waive Penalty (₹0)"
-                                className="inline-flex items-center gap-1 rounded-md bg-emerald-50 border border-emerald-200 px-2 py-1 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100 cursor-pointer transition-colors shadow-2xs"
-                              >
-                                <ShieldCheck className="h-3 w-3" />
-                                <span>Waive</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(e) => handleQuickFine(rec, 100, e)}
-                                title="1-Click Confirm Fine ₹100"
-                                className="inline-flex items-center gap-1 rounded-md bg-rose-50 border border-rose-200 px-2 py-1 text-[11px] font-semibold text-rose-700 hover:bg-rose-100 cursor-pointer transition-colors shadow-2xs"
-                              >
-                                <DollarSign className="h-3 w-3" />
-                                <span>Fine ₹100</span>
-                              </button>
-                            </>
-                          ) : null}
+                          {/* 2. Fast 1-Click Waive & Fine Shortcuts for Unprocessed Late Arrivals or Early Exits */}
+                          {(() => {
+                            const earlyInfo = computeEarlyExit(rec.last_out, checkoutSched, rec.early_permission_minutes);
+                            const hasEarlyExit = (rec.early_exit_minutes > 0 || earlyInfo.isEarly) && rec.status !== 'WFH' && rec.review_status !== 'WFH' && rec.status !== 'ON_DUTY' && rec.review_status !== 'ON_DUTY' && !rec.is_on_site && !rec.is_on_field;
+                            const hasLateArrival = rec.first_in && rec.late_minutes > 0;
+                            const needsAction = (hasLateArrival || hasEarlyExit) && !isFined && !isWaived;
+
+                            if (needsAction) {
+                              return (
+                                <>
+                                  {/* <button
+                                    type="button"
+                                    onClick={(e) => handleQuickWaive(rec, e)}
+                                    title="1-Click Waive Penalty (₹0)"
+                                    className="inline-flex items-center gap-1 rounded-md bg-emerald-50 border border-emerald-200 px-2 py-1 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100 cursor-pointer transition-colors shadow-2xs"
+                                  >
+                                    <ShieldCheck className="h-3 w-3" />
+                                    <span>Waive</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => handleQuickFine(rec, 100, e)}
+                                    title={`1-Click Confirm Fine ₹100 (${hasLateArrival ? 'Late Arrival' : 'Early Exit'})`}
+                                    className="inline-flex items-center gap-1 rounded-md bg-rose-50 border border-rose-200 px-2 py-1 text-[11px] font-semibold text-rose-700 hover:bg-rose-100 cursor-pointer transition-colors shadow-2xs"
+                                  >
+                                    <DollarSign className="h-3 w-3" />
+                                    <span>Fine ₹100</span>
+                                  </button> */}
+                                </>
+                              );
+                            }
+                            return null;
+                          })()}
 
                           {/* 3. Detailed Custom Fine / Permission Modal Trigger */}
-                          {rec.first_in && (
-                            <button
-                              type="button"
-                              onClick={() => openFineModal(rec)}
-                              className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold cursor-pointer transition-colors shadow-2xs ${
-                                isFined
-                                  ? 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
-                                  : isWaived
-                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
-                                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                          <button
+                            type="button"
+                            onClick={() => openFineModal(rec)}
+                            className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold cursor-pointer transition-colors shadow-2xs ${isFined
+                              ? 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
+                              : isWaived
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                               }`}
-                              title={rec.fine_status ? 'Edit Fine Confirmation' : 'Assess late arrival or apply permission'}
-                            >
-                              <DollarSign className="h-3 w-3" />
-                              <span>{isFined ? 'Fined ₹' + (rec.fine_amount || 100) : isWaived ? 'Waived' : 'Fine'}</span>
-                            </button>
-                          )}
+                            title={rec.fine_status ? 'Edit Fine Confirmation' : 'Assess late arrival, early exit or apply permission'}
+                          >
+                            <DollarSign className="h-3 w-3" />
+                            <span>{isFined ? 'Fined ₹' + (rec.fine_amount || 100) : isWaived ? 'Waived' : 'Fine'}</span>
+                          </button>
+
 
                           {/* 4. Fast 1-Click Confirm On-Site for staff on field */}
                           {(rec.is_on_site || rec.is_on_field || rec.status === 'ON_SITE') && rec.review_status !== 'ON_SITE' && (
@@ -1112,14 +1328,14 @@ export const UnifiedDailyAttendancePage = () => {
         />
       )}
 
-      {/* 2. Late Fine Assessment & Adjustment Modal (Identical to ManualLateFinePage) */}
+      {/* 2. Late Fine & Early Exit Assessment Modal */}
       {selectedFineRecord && (
         <Modal
           isOpen={Boolean(selectedFineRecord)}
           onClose={() => setSelectedFineRecord(null)}
-          title="Late Fine Assessment & Adjustment"
+          title="Late Fine & Early Exit Assessment"
           subtitle={`Employee: ${selectedFineRecord.employee_name} (${selectedFineRecord.employee_code}) • Date: ${selectedFineRecord.target_date || selectedDate}`}
-          size="md"
+          size="lg"
           footer={
             <>
               <button
@@ -1150,146 +1366,297 @@ export const UnifiedDailyAttendancePage = () => {
               </div>
             )}
 
-            {/* Information Grid */}
-            <div className="grid grid-cols-2 gap-3 rounded-lg bg-slate-50 p-3 text-slate-700">
-              <div>
-                <span className="text-[10px] text-slate-500 block">Actual Check-IN:</span>
-                <span className="font-mono font-semibold text-slate-800">
-                  {selectedFineRecord.first_in ? formatTimeOnly(selectedFineRecord.first_in) : 'No Check-In Recorded'}
-                </span>
-              </div>
-              <div>
-                <span className="text-[10px] text-slate-500 block">Effective Late Delay:</span>
-                {(() => {
-                  if (!selectedFineRecord.first_in) {
-                    return <span className="font-mono font-medium text-slate-500">0 mins (Not Punched)</span>;
-                  }
-                  const calculated = computeLateMinutes(selectedFineRecord.first_in, permissionMinutesInput);
-                  if (calculated === 0) {
-                    return (
-                      <span className="font-mono font-bold text-teal-600">
-                        0 mins (On Time / Permitted)
-                      </span>
-                    );
-                  }
-                  return (
-                    <span className="font-mono font-bold text-rose-600">
-                      {calculated} minutes late
-                    </span>
-                  );
-                })()}
-              </div>
-            </div>
+            {/* 2-Phase Grid: Morning (Late Arrival) & Evening (Early Exit & Closing Timing) */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Card 1: Morning Check-In & Late Arrival */}
+              <div className="rounded-xl border border-teal-200 bg-teal-50/30 p-3.5 space-y-3">
+                <div className="flex items-center justify-between border-b border-teal-100 pb-2">
+                  <span className="font-bold text-teal-950 flex items-center gap-1.5">
+                    <Clock className="h-4 w-4 text-teal-600" />
+                    1. Morning Check-In & Late Arrival
+                  </span>
+                  <span className="text-[10px] text-teal-700 font-medium">Shift Start: 09:30 AM</span>
+                </div>
 
-            {/* Manual Permission Grant Input */}
-            <div className="rounded-lg border border-teal-100 bg-teal-50/40 p-3">
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="block font-semibold text-teal-900">
-                  Permission Offset (Minutes)
-                </label>
-                <span className="text-[10px] text-teal-700">Calculated from 09:30 (No Grace Time)</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min="0"
-                  max="240"
-                  step="15"
-                  value={permissionMinutesInput}
-                  onChange={(e) => handlePermissionChange(e.target.value)}
-                  placeholder="0"
-                  className="w-full rounded-lg border border-teal-200 bg-white px-3 py-2 text-xs font-semibold text-slate-900 font-mono focus:border-teal-500 focus:outline-none"
-                />
-                <div className="flex gap-1 shrink-0">
-                  {[
-                    { label: 'None', mins: 0 },
-                    { label: '+30m', mins: 30 },
-                    { label: '+45m', mins: 45 },
-                    { label: '+1h', mins: 60 },
-                    { label: '+2h', mins: 120 },
-                  ].map((chip) => (
-                    <button
-                      key={chip.mins}
-                      type="button"
-                      onClick={() => handlePermissionChange(String(chip.mins))}
-                      className={`px-2 py-1.5 rounded-md text-[11px] font-semibold border cursor-pointer transition-colors ${
-                        Number(permissionMinutesInput) === chip.mins
-                          ? 'bg-teal-600 border-teal-600 text-white'
-                          : 'bg-white border-teal-200 text-teal-800 hover:bg-teal-100'
-                      }`}
-                    >
-                      {chip.label}
-                    </button>
-                  ))}
+                <div className="grid grid-cols-2 gap-2 bg-white rounded-lg p-2.5 border border-teal-100">
+                  <div>
+                    <span className="text-[10px] text-slate-500 block">Actual Check-IN</span>
+                    <span className="font-mono font-bold text-slate-800 text-[13px]">
+                      {selectedFineRecord.first_in ? formatTimeOnly(selectedFineRecord.first_in) : 'Not Punched'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-500 block">Effective Late Delay</span>
+                    {(() => {
+                      if (!selectedFineRecord.first_in) {
+                        return <span className="font-mono font-medium text-slate-400">0 mins (No Punch)</span>;
+                      }
+                      const lateMins = computeLateMinutes(selectedFineRecord.first_in, permissionMinutesInput);
+                      if (lateMins === 0) {
+                        return <span className="font-mono font-bold text-teal-700">0m (On Time / Permitted)</span>;
+                      }
+                      return <span className="font-mono font-bold text-rose-700">{formatMinutesToHM(lateMins)} late</span>;
+                    })()}
+                  </div>
+                </div>
+
+                {/* Late Permission Offset */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-semibold text-teal-900 text-[11px]">Late Permission Offset</label>
+                    <span className="text-[10px] text-teal-700">From 09:30 (no grace)</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="number"
+                      min="0"
+                      max="240"
+                      step="15"
+                      value={permissionMinutesInput}
+                      onChange={(e) => handleLatePermissionChange(e.target.value)}
+                      placeholder="0"
+                      className="w-20 rounded-md border border-teal-300 bg-white px-2 py-1 text-xs font-mono font-semibold text-slate-900 focus:outline-none focus:border-teal-500"
+                    />
+                    <div className="flex flex-wrap gap-1">
+                      {[
+                        { label: 'None', mins: 0 },
+                        { label: '+30m', mins: 30 },
+                        { label: '+45m', mins: 45 },
+                        { label: '+1h', mins: 60 },
+                        { label: '+2h', mins: 120 },
+                      ].map((chip) => (
+                        <button
+                          key={chip.mins}
+                          type="button"
+                          onClick={() => handleLatePermissionChange(String(chip.mins))}
+                          className={`px-1.5 py-1 rounded text-[10px] font-semibold border cursor-pointer transition-colors ${Number(permissionMinutesInput) === chip.mins
+                            ? 'bg-teal-600 border-teal-600 text-white'
+                            : 'bg-white border-teal-200 text-teal-800 hover:bg-teal-50'
+                            }`}
+                        >
+                          {chip.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {Number(permissionMinutesInput) > 0 ? (
+                    <p className="text-[10px] text-teal-800 font-medium mt-1">
+                      Permission: Must check in by{' '}
+                      <strong>
+                        {(() => {
+                          const d = new Date(`2000-01-01T09:30:00`);
+                          d.setMinutes(d.getMinutes() + Number(permissionMinutesInput));
+                          return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+                        })()}
+                      </strong> (09:30 AM + {permissionMinutesInput}m permission, grace does not apply)
+                    </p>
+                  ) : (
+                    <p className="text-[10px] text-slate-500 mt-1">
+                      Cutoff: <strong>09:40 AM</strong> (09:30 AM + 10m grace). Late calculated from 09:40 AM.
+                    </p>
+                  )}
                 </div>
               </div>
-              {Number(permissionMinutesInput) > 0 ? (
-                <p className="text-[11px] text-teal-700 font-medium mt-1.5 flex items-center gap-1">
-                  <Check className="h-3 w-3 text-teal-600" />
-                  {permissionMinutesInput} mins permission granted — Must check in by{' '}
-                  <strong>
+
+              {/* Card 2: Evening Departure & Early Exit */}
+              <div className="rounded-xl border border-indigo-200 bg-indigo-50/30 p-3.5 space-y-3">
+                <div className="flex items-center justify-between border-b border-indigo-100 pb-2">
+                  <span className="font-bold text-indigo-950 flex items-center gap-1.5">
+                    <Clock className="h-4 w-4 text-indigo-600" />
+                    2. Evening Departure & Early Exit
+                  </span>
+                  <span className="text-[10px] text-indigo-700 font-medium">Configured Individually</span>
+                </div>
+
+                {/* Assigned Closing Time Switcher */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-semibold text-slate-800 text-[11px]">Assigned Office Closing</label>
+                    <span className="text-[10px] text-indigo-700">Per-employee schedule</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => handleAssignedCheckoutChange('19:30')}
+                      className={`flex-1 py-1 px-2 rounded-md text-[11px] font-semibold border cursor-pointer transition-colors ${assignedCheckoutInput === '19:30'
+                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                        }`}
+                    >
+                      07:30 PM (Regular)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleAssignedCheckoutChange('18:45')}
+                      className={`flex-1 py-1 px-2 rounded-md text-[11px] font-semibold border cursor-pointer transition-colors ${assignedCheckoutInput === '18:45'
+                        ? 'bg-purple-600 text-white border-purple-600 shadow-2xs'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                        }`}
+                    >
+                      06:45 PM (Designated)
+                    </button>
+                    <input
+                      type="time"
+                      value={assignedCheckoutInput}
+                      onChange={(e) => handleAssignedCheckoutChange(e.target.value)}
+                      className="w-20 rounded-md border border-indigo-200 bg-white px-1.5 py-1 text-xs font-mono font-semibold text-slate-900 focus:outline-none focus:border-indigo-500"
+                      title="Custom shift closing time"
+                    />
+                  </div>
+                </div>
+
+                {/* Punch Out & Early Exit Display */}
+                <div className="grid grid-cols-2 gap-2 bg-white rounded-lg p-2.5 border border-indigo-100">
+                  <div>
+                    <span className="text-[10px] text-slate-500 block">Actual Check-OUT</span>
+                    <span className="font-mono font-bold text-slate-800 text-[13px]">
+                      {selectedFineRecord.last_out ? formatTimeOnly(selectedFineRecord.last_out) : 'Not Punched'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-500 block">Early Exit Duration</span>
                     {(() => {
-                      const d = new Date(`2000-01-01T09:30:00`);
-                      d.setMinutes(d.getMinutes() + Number(permissionMinutesInput));
-                      return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+                      if (!selectedFineRecord.last_out) {
+                        return <span className="font-mono font-medium text-slate-400">0 mins (No Punch)</span>;
+                      }
+                      const earlyInfo = computeEarlyExit(selectedFineRecord.last_out, assignedCheckoutInput, earlyPermissionMinutesInput);
+                      if (!earlyInfo.isEarly || earlyInfo.earlyMinutes === 0) {
+                        return <span className="font-mono font-bold text-emerald-700">0m (On Time / Permitted)</span>;
+                      }
+                      return (
+                        <span className="font-mono font-bold text-rose-700">
+                          {formatMinutesToHM(earlyInfo.earlyMinutes)} early
+                        </span>
+                      );
                     })()}
-                  </strong>{' '}
-                  (from 09:30 AM, no grace time)
-                </p>
-              ) : (
-                <p className="text-[11px] text-slate-500 mt-1.5">
-                  Standard check-in: 09:30 AM + 10 mins grace period (Cutoff at <strong>09:40 AM</strong>).
-                </p>
-              )}
+                  </div>
+                </div>
+
+                {/* Early Permission Offset */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-semibold text-indigo-950 text-[11px]">Early Exit Permission</label>
+                    <span className="text-[10px] text-indigo-700">Allowed departure adjustment</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="number"
+                      min="0"
+                      max="240"
+                      step="15"
+                      value={earlyPermissionMinutesInput}
+                      onChange={(e) => handleEarlyPermissionChange(e.target.value)}
+                      placeholder="0"
+                      className="w-20 rounded-md border border-indigo-300 bg-white px-2 py-1 text-xs font-mono font-semibold text-slate-900 focus:outline-none focus:border-indigo-500"
+                    />
+                    <div className="flex flex-wrap gap-1">
+                      {[
+                        { label: 'None', mins: 0 },
+                        { label: '+15m', mins: 15 },
+                        { label: '+30m', mins: 30 },
+                        { label: '+45m', mins: 45 },
+                        { label: '+1h', mins: 60 },
+                        { label: '+2h', mins: 120 },
+                      ].map((chip) => (
+                        <button
+                          key={chip.mins}
+                          type="button"
+                          onClick={() => handleEarlyPermissionChange(String(chip.mins))}
+                          className={`px-1.5 py-1 rounded text-[10px] font-semibold border cursor-pointer transition-colors ${Number(earlyPermissionMinutesInput) === chip.mins
+                            ? 'bg-indigo-600 border-indigo-600 text-white'
+                            : 'bg-white border-indigo-200 text-indigo-800 hover:bg-indigo-50'
+                            }`}
+                        >
+                          {chip.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-indigo-900 font-medium mt-1">
+                    {Number(earlyPermissionMinutesInput) > 0 ? (
+                      <span>
+                        Allowed exit from <strong>{computeEarlyExit(selectedFineRecord.last_out || new Date(), assignedCheckoutInput, earlyPermissionMinutesInput).allowedExitStr}</strong> (06:30 PM office closing minus {earlyPermissionMinutesInput}m permission)
+                      </span>
+                    ) : (
+                      <span>Assigned closing time: <strong>{assignedCheckoutInput === '18:45' ? '06:45 PM (Designated Shift)' : '07:30 PM (Standard)'}</strong> (No early permission)</span>
+                    )}
+                  </p>
+                </div>
+              </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block font-medium text-slate-700 mb-1">Fine Status *</label>
-                <select
-                  value={fineStatusInput}
-                  onChange={(e) => setFineStatusInput(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-800"
-                >
-                  <option value="CONFIRMED">CONFIRMED (Apply Fine to Ledger)</option>
-                  <option value="WAIVED">WAIVED (Waive Penalty / Permitted - ₹0)</option>
-                </select>
+            {/* Assessment Summary & Fine Action */}
+            <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3.5 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-slate-900 text-xs">3. Assessment Outcome & Penalty Action</span>
+                <div className="flex items-center gap-2">
+                  {(() => {
+                    const late = selectedFineRecord.first_in ? computeLateMinutes(selectedFineRecord.first_in, permissionMinutesInput) : 0;
+                    const early = selectedFineRecord.last_out ? computeEarlyExit(selectedFineRecord.last_out, assignedCheckoutInput, earlyPermissionMinutesInput).earlyMinutes : 0;
+                    return (
+                      <div className="flex items-center gap-1.5 font-mono text-[11px]">
+                        <span className={`px-2 py-0.5 rounded font-bold ${late > 0 ? 'bg-rose-100 text-rose-800' : 'bg-emerald-100 text-emerald-800'}`}>
+                          Late: {late > 0 ? formatMinutesToHM(late) : '0m'}
+                        </span>
+                        <span className={`px-2 py-0.5 rounded font-bold ${early > 0 ? 'bg-rose-100 text-rose-800' : 'bg-emerald-100 text-emerald-800'}`}>
+                          Early: {early > 0 ? formatMinutesToHM(early) : '0m'}
+                        </span>
+                      </div>
+                    );
+                  })()}
+                </div>
               </div>
 
-              <div>
-                <label className="block font-medium text-slate-700 mb-1">Fine Amount (INR) *</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="50"
-                  disabled={fineStatusInput === 'WAIVED'}
-                  value={fineStatusInput === 'WAIVED' ? '0' : fineAmountInput}
-                  onChange={(e) => setFineAmountInput(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs text-slate-900 font-mono font-semibold"
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Fine Assessment Decision *</label>
+                  <select
+                    value={fineStatusInput}
+                    onChange={(e) => setFineStatusInput(e.target.value)}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-800 focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="CONFIRMED">CONFIRMED (Apply Fine Penalty)</option>
+                    <option value="WAIVED">WAIVED (Excuse Penalty / Permitted - ₹0)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Fine Amount (INR) *</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="50"
+                    disabled={fineStatusInput === 'WAIVED'}
+                    value={fineStatusInput === 'WAIVED' ? '0' : fineAmountInput}
+                    onChange={(e) => setFineAmountInput(e.target.value)}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-900 font-mono font-bold focus:outline-none focus:border-indigo-500 disabled:bg-slate-100 disabled:text-slate-400"
+                  />
+                </div>
               </div>
-            </div>
 
-            <div>
-              <label className="block font-medium text-slate-700 mb-1">Reason / Notes</label>
-              <textarea
-                rows={2}
-                value={fineReasonInput}
-                onChange={(e) => setFineReasonInput(e.target.value)}
-                placeholder="e.g. Traffic delay / Approved verbal permission / Medical checkup..."
-                className="w-full rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs text-slate-900"
-              />
-            </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-medium text-slate-700 mb-1">Reason / Remarks</label>
+                  <input
+                    type="text"
+                    value={fineReasonInput}
+                    onChange={(e) => setFineReasonInput(e.target.value)}
+                    placeholder="e.g. Approved evening permission / Traffic delay / Assigned early closing..."
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
 
-            <div>
-              <label className="block font-medium text-slate-700 mb-1">Entered / Authorized By *</label>
-              <input
-                type="text"
-                required
-                value={enteredByInput}
-                onChange={(e) => setEnteredByInput(e.target.value)}
-                className="w-full rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs text-slate-900"
-              />
+                <div>
+                  <label className="block font-medium text-slate-700 mb-1">Entered / Authorized By *</label>
+                  <input
+                    type="text"
+                    required
+                    value={enteredByInput}
+                    onChange={(e) => setEnteredByInput(e.target.value)}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+              </div>
             </div>
           </form>
         </Modal>

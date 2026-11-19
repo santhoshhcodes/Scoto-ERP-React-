@@ -36,6 +36,14 @@ export const transactionApi = {
     );
   },
 
+  reviseQuotation: async (transNo, payload) => {
+    return await apiClient.post(API_ENDPOINTS.TRANSACTION.QUOTATION_REVISE(transNo), payload);
+  },
+
+  getQuotationHistory: async (transNo) => {
+    return await apiClient.get(API_ENDPOINTS.TRANSACTION.QUOTATION_REVISIONS(transNo));
+  },
+
   deleteQuotation: async (transNo) => {
     return await apiClient.delete(API_ENDPOINTS.TRANSACTION.QUOTATION_BY_NO(transNo));
   },
@@ -205,6 +213,21 @@ export const transactionApi = {
     window.URL.revokeObjectURL(url);
   },
 
+  previewBulkSalesInvoices: async (formData) => {
+    return await apiClient.post(API_ENDPOINTS.TRANSACTION.SALES_INVOICE_BULK_UPLOAD_PREVIEW, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      timeout: 120000,
+    });
+  },
+
+  commitBulkSalesInvoices: async (payload) => {
+    return await apiClient.post(API_ENDPOINTS.TRANSACTION.SALES_INVOICE_BULK_UPLOAD_COMMIT, payload, {
+      timeout: 120000,
+    });
+  },
+
   // ==========================================
   // Office Expense Module APIs (Petty Cash Ledger)
   // ==========================================
@@ -332,6 +355,26 @@ export const useDeleteQuotation = () => {
 export const useDownloadQuotationExcel = () => {
   return useMutation({
     mutationFn: ({ transNo }) => transactionApi.downloadQuotationExcel(transNo),
+  });
+};
+
+export const useQuotationHistory = (transNo, { enabled = true } = {}) => {
+  return useQuery({
+    queryKey: ['transaction', 'quotation-history', transNo],
+    queryFn: () => transactionApi.getQuotationHistory(transNo),
+    enabled: Boolean(transNo && enabled),
+    staleTime: 5000,
+  });
+};
+
+export const useReviseQuotation = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ transNo, payload }) => transactionApi.reviseQuotation(transNo, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['transaction', 'quotations'] });
+      queryClient.invalidateQueries({ queryKey: ['transaction', 'quotation-history'] });
+    },
   });
 };
 
@@ -493,6 +536,25 @@ export const useDeleteSalesInvoice = () => {
 export const useDownloadSalesInvoiceExcel = () => {
   return useMutation({
     mutationFn: ({ transNo }) => transactionApi.downloadSalesInvoiceExcel(transNo),
+  });
+};
+
+export const usePreviewBulkSalesInvoices = () => {
+  return useMutation({
+    mutationFn: (formData) => transactionApi.previewBulkSalesInvoices(formData),
+  });
+};
+
+export const useCommitBulkSalesInvoices = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload) => transactionApi.commitBulkSalesInvoices(payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['transaction', 'sales-invoices'] });
+      queryClient.invalidateQueries({ queryKey: ['master', 'ledgers'] });
+      queryClient.invalidateQueries({ queryKey: ['master', 'items'] });
+      queryClient.invalidateQueries({ queryKey: ['customer-report'] });
+    },
   });
 };
 

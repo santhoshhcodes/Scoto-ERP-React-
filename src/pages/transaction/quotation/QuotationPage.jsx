@@ -8,6 +8,8 @@ import {
   Edit2,
   Trash2,
   CheckCircle2,
+  Check,
+  X,
   Clock,
   ArrowLeft,
   DollarSign,
@@ -22,6 +24,9 @@ import {
   Loader2,
   Download,
   FileSpreadsheet,
+  GitBranch,
+  History,
+  Lock,
 } from 'lucide-react';
 import {
   useQuotations,
@@ -34,7 +39,9 @@ import { useMasterItems, useMasterLedgers } from '../../../api/masterApi';
 import { useSortableData, SortableHeader } from '../../../utils/sortUtils';
 import { DocumentActionDropdown } from '../../../components/common/DocumentActionDropdown';
 import { DocumentPrintModal } from '../../../components/common/DocumentPrintModal';
+import { QuotationRevisionModal } from './QuotationRevisionModal';
 import { useFinancialYear } from '../../../context/FinancialYearContext';
+import { generateNextTransactionNo, getFullFinYear } from '../../../utils/transactionNumberUtils';
 
 const GST_RATES = [0, 5, 12, 18, 28];
 const UOM_OPTIONS = ['Pcs', 'No', 'Roll', 'Set', 'Mtr', 'Box', 'Unit', 'Kg'];
@@ -86,6 +93,13 @@ export const QuotationPage = () => {
   const [downloadingTransNo, setDownloadingTransNo] = useState(null);
   const [printDoc, setPrintDoc] = useState(null);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
+  const [activeReviseDoc, setActiveReviseDoc] = useState(null);
+  const [reviseModalTab, setReviseModalTab] = useState('draft');
+
+  const handleOpenReviseModal = (quo, tab = 'draft') => {
+    setActiveReviseDoc(quo);
+    setReviseModalTab(tab);
+  };
 
   const availableItems = masterItemsRes?.data ?? [];
   const availableLedgers = masterLedgersRes?.data ?? [];
@@ -106,6 +120,52 @@ export const QuotationPage = () => {
 
   const [gridItems, setGridItems] = useState([]);
   const [currentRow, setCurrentRow] = useState(INITIAL_ITEM_ROW);
+  const [editingItemIndex, setEditingItemIndex] = useState(null);
+  const [isInterState, setIsInterState] = useState(false);
+
+  // Helper: Detect if customer ledger is outside Tamil Nadu (TN state code is '33')
+  const checkIsInterState = (customer) => {
+    if (!customer) return false;
+    const gstNo = String(customer.GSTNo || customer.gst_no || customer.GST || '').trim();
+    if (gstNo.length >= 2) {
+      return gstNo.substring(0, 2) !== '33';
+    }
+    const state = String(customer.State || customer.state || '').trim().toLowerCase();
+    if (state && !['tamil nadu', 'tamilnadu', 'tn'].includes(state)) {
+      return true;
+    }
+    return false;
+  };
+
+  // Helper: calculate a row's taxes dynamically for Intra (CGST+SGST) vs Inter (IGST)
+  const calculateRowTax = (row, interState) => {
+    const rate = Number(row.Rate) || 0;
+    const qty = Number(row.Qty) || 0;
+    const gstPercent = Number(row.GST) || 0;
+    const itemVal = rate * qty;
+
+    if (interState) {
+      const igst = (itemVal * gstPercent) / 100;
+      return {
+        ...row,
+        ItemValue: itemVal,
+        CGST: 0,
+        SGST: 0,
+        IGST: igst,
+        NetAmount: itemVal + igst,
+      };
+    } else {
+      const halfGst = (itemVal * (gstPercent / 2)) / 100;
+      return {
+        ...row,
+        ItemValue: itemVal,
+        CGST: halfGst,
+        SGST: halfGst,
+        IGST: 0,
+        NetAmount: itemVal + halfGst * 2,
+      };
+    }
+  };
 
   const quotations = quotationResponse?.data ?? [];
   const {
@@ -126,8 +186,11 @@ export const QuotationPage = () => {
   const handleOpenAdd = () => {
     setEditingTransNo(null);
     setNotification(null);
-    const nextNo = `QUO-2026-${String(quotations.length + 1).padStart(3, '0')}`;
+    setEditingItemIndex(null);
+    setIsInterState(false);
+    const nextNo = generateNextTransactionNo('SQ', selectedFinYear, quotations);
     setFormHeader({
+      FinYearVal: getFullFinYear(selectedFinYear),
       TransNo: nextNo,
       TransDate: new Date().toISOString().split('T')[0],
       ProdType: '1',
@@ -152,6 +215,11 @@ export const QuotationPage = () => {
   const handleOpenEdit = (quotation) => {
     setEditingTransNo(quotation.TransNo);
     setNotification(null);
+    setEditingItemIndex(null);
+    const hasIgst =
+      Number(quotation.TotalIGSTAmount || 0) > 0 ||
+      (quotation.Items || []).some((it) => Number(it.IGST || 0) > 0);
+    setIsInterState(hasIgst);
     setFormHeader({
       TransNo: quotation.TransNo,
       TransDate: quotation.TransDate || new Date().toISOString().split('T')[0],
@@ -176,6 +244,7 @@ export const QuotationPage = () => {
   const handleBackToList = () => {
     setViewMode('list');
     setEditingTransNo(null);
+    setEditingItemIndex(null);
   };
 
   // Current Row Calculation
@@ -192,25 +261,11 @@ export const QuotationPage = () => {
         }
       }
 
-      const rate = Number(updated.Rate) || 0;
-      const qty = Number(updated.Qty) || 0;
-      const gstPercent = Number(updated.GST) || 0;
-
-      const itemVal = rate * qty;
-      const halfGst = (itemVal * (gstPercent / 2)) / 100;
-      const net = itemVal + halfGst * 2;
-
-      updated.ItemValue = itemVal;
-      updated.CGST = halfGst;
-      updated.SGST = halfGst;
-      updated.IGST = 0;
-      updated.NetAmount = net;
-
-      return updated;
+      return calculateRowTax(updated, isInterState);
     });
   };
 
-  // Add Item to Grid
+  // Add or Update Item in Grid
   const handleAddItem = (e) => {
     e.preventDefault();
     if (!currentRow.ProductType || Number(currentRow.Rate) <= 0 || Number(currentRow.Qty) <= 0) {
@@ -218,15 +273,50 @@ export const QuotationPage = () => {
       return;
     }
 
-    setGridItems((prev) => [...prev, { ...currentRow, order_id: String(prev.length + 1) }]);
+    if (editingItemIndex !== null) {
+      setGridItems((prev) =>
+        prev.map((item, idx) => (idx === editingItemIndex ? { ...currentRow, order_id: item.order_id } : item))
+      );
+      setEditingItemIndex(null);
+      setCurrentRow({
+        ...INITIAL_ITEM_ROW,
+        order_id: String(gridItems.length + 1),
+      });
+    } else {
+      setGridItems((prev) => [...prev, { ...currentRow, order_id: String(prev.length + 1) }]);
+      setCurrentRow({
+        ...INITIAL_ITEM_ROW,
+        order_id: String(gridItems.length + 2),
+      });
+    }
+  };
+
+  // Edit Line Item from Grid
+  const handleEditItem = (index) => {
+    const itemToEdit = gridItems[index];
+    if (!itemToEdit) return;
+    setEditingItemIndex(index);
+    setCurrentRow({ ...itemToEdit });
+  };
+
+  // Cancel Line Item Edit
+  const handleCancelItemEdit = () => {
+    setEditingItemIndex(null);
     setCurrentRow({
       ...INITIAL_ITEM_ROW,
-      order_id: String(gridItems.length + 2),
+      order_id: String(gridItems.length + 1),
     });
   };
 
   // Remove Item from Grid
   const handleRemoveItem = (index) => {
+    if (editingItemIndex === index) {
+      setEditingItemIndex(null);
+      setCurrentRow({
+        ...INITIAL_ITEM_ROW,
+        order_id: String(gridItems.length),
+      });
+    }
     setGridItems((prev) =>
       prev.filter((_, i) => i !== index).map((item, idx) => ({ ...item, order_id: String(idx + 1) }))
     );
@@ -258,6 +348,7 @@ export const QuotationPage = () => {
 
     const payload = {
       ...formHeader,
+      FinYearVal: formHeader.FinYearVal || getFullFinYear(selectedFinYear, formHeader.TransDate),
       Items: gridItems,
       TotalQty: totalQty,
       TotalItemAmount: totalItemAmount,
@@ -426,7 +517,17 @@ export const QuotationPage = () => {
                   <input
                     type="date"
                     value={formHeader.TransDate}
-                    onChange={(e) => setFormHeader({ ...formHeader, TransDate: e.target.value })}
+                    onChange={(e) => {
+                      const newDate = e.target.value;
+                      setFormHeader((prev) => {
+                        const updated = { ...prev, TransDate: newDate };
+                        if (!editingTransNo && selectedFinYear === 'ALL') {
+                          updated.TransNo = generateNextTransactionNo('SQ', selectedFinYear, quotations, newDate);
+                          updated.FinYearVal = getFullFinYear(selectedFinYear, newDate);
+                        }
+                        return updated;
+                      });
+                    }}
                     className="w-full pl-9 pr-3 py-2 text-sm rounded-lg bg-slate-50 border border-slate-200 text-slate-900 focus:bg-white focus:ring-2 focus:ring-indigo-500/20"
                     required
                   />
@@ -451,11 +552,30 @@ export const QuotationPage = () => {
                 </select>
               </div>
 
-              {/* Customer Name */}
+              {/* Customer Name & Tax Mode */}
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Customer Name <span className="text-rose-500">*</span>
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-slate-700">
+                    Customer Name <span className="text-rose-500">*</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextMode = !isInterState;
+                      setIsInterState(nextMode);
+                      setGridItems((prev) => prev.map((item) => calculateRowTax(item, nextMode)));
+                      setCurrentRow((prev) => calculateRowTax(prev, nextMode));
+                    }}
+                    className={`px-2 py-0.5 rounded text-[10px] font-bold border transition-colors cursor-pointer ${
+                      isInterState
+                        ? 'bg-purple-100 text-purple-800 border-purple-300'
+                        : 'bg-indigo-100 text-indigo-800 border-indigo-300'
+                    }`}
+                    title="Click to manually toggle between Intra-State (CGST+SGST) and Inter-State (IGST)"
+                  >
+                    {isInterState ? '🌐 Inter-State (IGST)' : '📍 Intra-State (CGST+SGST)'}
+                  </button>
+                </div>
                 <input
                   type="text"
                   list="quo-ledgers"
@@ -463,11 +583,17 @@ export const QuotationPage = () => {
                   onChange={(e) => {
                     const name = e.target.value;
                     const matched = availableLedgers.find((l) => l.LedgerName === name);
+                    const inter = checkIsInterState(matched);
+                    setIsInterState(inter);
                     setFormHeader({
                       ...formHeader,
                       CustomerName: name,
                       CustomerCode: matched?.LedgerCode || formHeader.CustomerCode,
                     });
+                    if (gridItems.length > 0) {
+                      setGridItems((prev) => prev.map((item) => calculateRowTax(item, inter)));
+                    }
+                    setCurrentRow((prev) => calculateRowTax(prev, inter));
                   }}
                   className="w-full px-3 py-2 text-sm rounded-lg bg-slate-50 border border-slate-200 text-slate-900 focus:bg-white focus:ring-2 focus:ring-indigo-500/20"
                   required
@@ -637,16 +763,38 @@ export const QuotationPage = () => {
                 </select>
               </div>
 
-              {/* Add Button */}
-              <div className="lg:col-span-1 flex items-end">
-                <button
-                  type="button"
-                  onClick={handleAddItem}
-                  className="w-full py-1.5 px-2 rounded bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-xs transition-colors flex items-center justify-center gap-1 cursor-pointer"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  Add
-                </button>
+              {/* Add / Update Button */}
+              <div className="lg:col-span-1 flex items-end gap-1.5">
+                {editingItemIndex !== null ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleAddItem}
+                      className="flex-1 py-1.5 px-2 rounded bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold shadow-xs transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                      title="Update this line item"
+                    >
+                      <Check className="h-3.5 w-3.5" />
+                      Update
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCancelItemEdit}
+                      className="py-1.5 px-2 rounded bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-semibold transition-colors flex items-center justify-center cursor-pointer"
+                      title="Cancel item editing"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleAddItem}
+                    className="w-full py-1.5 px-2 rounded bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-xs transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Add
+                  </button>
+                )}
               </div>
             </div>
 
@@ -664,8 +812,14 @@ export const QuotationPage = () => {
                     <th className="px-2 py-2.5 text-center">Qty</th>
                     <th className="px-3 py-2.5 text-right">Item Value</th>
                     <th className="px-2 py-2.5 text-center">GST</th>
-                    <th className="px-2.5 py-2.5 text-right">CGST</th>
-                    <th className="px-2.5 py-2.5 text-right">SGST</th>
+                    {isInterState ? (
+                      <th className="px-3 py-2.5 text-right text-purple-700">IGST</th>
+                    ) : (
+                      <>
+                        <th className="px-2.5 py-2.5 text-right">CGST</th>
+                        <th className="px-2.5 py-2.5 text-right">SGST</th>
+                      </>
+                    )}
                     <th className="px-3 py-2.5 text-right">Net Amount</th>
                     <th className="px-2 py-2.5 text-center">Mode</th>
                   </tr>
@@ -673,13 +827,20 @@ export const QuotationPage = () => {
                 <tbody className="divide-y divide-slate-100">
                   {gridItems.length === 0 ? (
                     <tr>
-                      <td colSpan={13} className="px-4 py-8 text-center text-slate-400">
+                      <td colSpan={isInterState ? 12 : 13} className="px-4 py-8 text-center text-slate-400">
                         No line items added yet. Fill in the fields above and click "+ Add" to populate.
                       </td>
                     </tr>
                   ) : (
                     gridItems.map((item, index) => (
-                      <tr key={index} className="hover:bg-slate-50/70 transition-colors">
+                      <tr
+                        key={index}
+                        className={
+                          editingItemIndex === index
+                            ? 'bg-amber-50/80 ring-1 ring-amber-300 transition-colors'
+                            : 'hover:bg-slate-50/70 transition-colors'
+                        }
+                      >
                         <td className="px-3 py-2 font-mono font-bold text-slate-900">{item.order_id}</td>
                         <td className="px-3 py-2 font-semibold text-slate-900">{item.ProductType}</td>
                         <td className="px-3 py-2 text-slate-600">{item.Prod_highlight || '-'}</td>
@@ -691,24 +852,42 @@ export const QuotationPage = () => {
                           ₹{Number(item.ItemValue).toFixed(2)}
                         </td>
                         <td className="px-2 py-2 text-center font-mono">{item.GST}%</td>
-                        <td className="px-2.5 py-2 text-right font-mono text-slate-500">
-                          ₹{Number(item.CGST).toFixed(2)}
-                        </td>
-                        <td className="px-2.5 py-2 text-right font-mono text-slate-500">
-                          ₹{Number(item.SGST).toFixed(2)}
-                        </td>
+                        {isInterState ? (
+                          <td className="px-3 py-2 text-right font-mono font-bold text-purple-700">
+                            ₹{Number(item.IGST || 0).toFixed(2)}
+                          </td>
+                        ) : (
+                          <>
+                            <td className="px-2.5 py-2 text-right font-mono text-slate-500">
+                              ₹{Number(item.CGST || 0).toFixed(2)}
+                            </td>
+                            <td className="px-2.5 py-2 text-right font-mono text-slate-500">
+                              ₹{Number(item.SGST || 0).toFixed(2)}
+                            </td>
+                          </>
+                        )}
                         <td className="px-3 py-2 text-right font-mono font-bold text-indigo-700">
                           ₹{Number(item.NetAmount).toFixed(2)}
                         </td>
                         <td className="px-2 py-2 text-center">
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveItem(index)}
-                            className="p-1 rounded text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
-                            title="Remove item"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
+                          <div className="flex items-center justify-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleEditItem(index)}
+                              className="p-1 rounded text-indigo-600 hover:bg-indigo-50 transition-colors cursor-pointer"
+                              title="Edit item"
+                            >
+                              <Edit2 className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveItem(index)}
+                              className="p-1 rounded text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                              title="Remove item"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -729,10 +908,21 @@ export const QuotationPage = () => {
                   <span className="text-base font-bold text-slate-900 font-mono">₹{totalItemAmount.toFixed(2)}</span>
                 </div>
                 <div>
-                  <span className="block text-[10px] font-bold text-slate-500 uppercase">CGST / SGST</span>
-                  <span className="text-base font-bold text-slate-700 font-mono">
-                    ₹{(totalCGSTAmount + totalSGSTAmount).toFixed(2)}
-                  </span>
+                  {totalIGSTAmount > 0 || isInterState ? (
+                    <>
+                      <span className="block text-[10px] font-bold text-purple-700 uppercase">Total Tax (IGST)</span>
+                      <span className="text-base font-bold text-purple-900 font-mono">
+                        ₹{totalIGSTAmount.toFixed(2)}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="block text-[10px] font-bold text-slate-500 uppercase">CGST / SGST</span>
+                      <span className="text-base font-bold text-slate-700 font-mono">
+                        ₹{(totalCGSTAmount + totalSGSTAmount).toFixed(2)}
+                      </span>
+                    </>
+                  )}
                 </div>
                 <div>
                   <span className="block text-[10px] font-bold text-slate-500 uppercase">Round Off</span>
@@ -1027,7 +1217,33 @@ export const QuotationPage = () => {
                 sortedQuotations.map((quo, index) => (
                   <tr key={quo.TransNo} className="hover:bg-slate-50/80 transition-colors">
                     <td className="px-4 py-3 font-mono text-slate-400 font-semibold">{index + 1}</td>
-                    <td className="px-4 py-3 font-mono font-bold text-indigo-600">{quo.TransNo}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-mono font-bold text-indigo-600">{quo.TransNo}</span>
+                        {quo.RevNo > 0 ? (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenReviseModal(quo, 'history')}
+                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-extrabold cursor-pointer transition-transform hover:scale-105 ${
+                              quo.RevNo >= 3
+                                ? 'bg-purple-100 text-purple-800 border border-purple-300'
+                                : quo.RevNo === 2
+                                ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                                : 'bg-blue-100 text-blue-800 border border-blue-300'
+                            }`}
+                            title="Click to view Revision History & Audit Log"
+                          >
+                            {quo.RevNo >= 3 && <Lock className="h-2.5 w-2.5" />}
+                            {quo.RevLabel || `${quo.RevNo}R`}
+                            {quo.RevNo >= 3 && ' (Final)'}
+                          </button>
+                        ) : (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-600 border border-slate-200">
+                            Orig
+                          </span>
+                        )}
+                      </div>
+                    </td>
                     <td className="px-4 py-3 text-slate-600">{quo.TransDate}</td>
                     <td className="px-4 py-3 font-semibold text-slate-900">{quo.CustomerName}</td>
                     <td className="px-4 py-3 text-slate-600 max-w-xs truncate">{quo.Narration || '-'}</td>
@@ -1045,20 +1261,55 @@ export const QuotationPage = () => {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-center">
-                      <div className="flex items-center justify-center gap-1.5">
+                      <div className="flex items-center justify-center gap-1">
                         <DocumentActionDropdown
                           onPrint={() => handleOpenPrintModal(quo)}
                           onDownloadExcel={() => handleDownloadExcel(quo.TransNo)}
                           isDownloading={downloadingTransNo === quo.TransNo}
                         />
+
+                        {/* Revise Button (New Row Versioning) */}
+                        {quo.RevNo >= 3 || quo.IsLocked ? (
+                          <button
+                            type="button"
+                            disabled
+                            className="p-1.5 rounded-lg text-slate-300 cursor-not-allowed"
+                            title="Revision limit reached (3/3). Maximum 3 revisions allowed. Further revisions locked."
+                          >
+                            <GitBranch className="h-4 w-4" />
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenReviseModal(quo, 'draft')}
+                            className="p-1.5 rounded-lg text-amber-600 hover:bg-amber-50 transition-colors cursor-pointer"
+                            title={`Revise Quotation (Create ${Number(quo.RevNo || 0) + 1}R)`}
+                          >
+                            <GitBranch className="h-4 w-4" />
+                          </button>
+                        )}
+
+                        {/* History & Compare Button */}
+                        <button
+                          type="button"
+                          onClick={() => handleOpenReviseModal(quo, 'compare')}
+                          className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+                          title="Revision History & Multi-Version Compare"
+                        >
+                          <History className="h-4 w-4" />
+                        </button>
+
+                        {/* Edit Button (In-place correction) */}
                         <button
                           type="button"
                           onClick={() => handleOpenEdit(quo)}
                           className="p-1.5 rounded-lg text-indigo-600 hover:bg-indigo-50 transition-colors cursor-pointer"
-                          title="Edit Quotation"
+                          title="Edit Quotation (In-place clerical correction)"
                         >
                           <Edit2 className="h-4 w-4" />
                         </button>
+
+                        {/* Delete Button */}
                         <button
                           type="button"
                           onClick={() => handleDelete(quo.TransNo)}
@@ -1092,6 +1343,23 @@ export const QuotationPage = () => {
           )}
           onDownloadExcel={() => handleDownloadExcel(printDoc.TransNo)}
           isDownloading={downloadingTransNo === printDoc.TransNo}
+        />
+      )}
+
+      {/* Quotation Revision & Version Comparison Workspace Modal */}
+      {activeReviseDoc && (
+        <QuotationRevisionModal
+          isOpen={Boolean(activeReviseDoc)}
+          onClose={() => setActiveReviseDoc(null)}
+          quotation={activeReviseDoc}
+          initialTab={reviseModalTab}
+          onPrintVersion={(vDoc) => handleOpenPrintModal(vDoc)}
+          onRevisionSuccess={(newDoc) => {
+            setNotification({
+              type: 'success',
+              message: `Quotation successfully revised to ${newDoc?.TransNo || 'new revision'}!`,
+            });
+          }}
         />
       )}
     </div>

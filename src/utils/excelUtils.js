@@ -1,6 +1,32 @@
 import * as XLSX from 'xlsx';
 
 /**
+ * Formats a duration in minutes into a clean "Xh Ym" or "Ym" format.
+ * If minutes >= 60, format as "Xh Ym" (e.g., 70 -> "1h 10m", 120 -> "2h 0m", 60 -> "1h 0m").
+ * If minutes < 60, format as "Ym" (e.g., 45 -> "45m", 15 -> "15m").
+ * Handles 0, null, undefined gracefully with fallback (default '0m').
+ *
+ * @param {number|string} minutes
+ * @param {string} fallback
+ * @returns {string}
+ */
+export const formatMinutesToHM = (minutes, fallback = '0m') => {
+  if (minutes === null || minutes === undefined || minutes === '' || isNaN(Number(minutes))) {
+    return fallback;
+  }
+  const totalMins = Math.round(Number(minutes));
+  if (totalMins <= 0) return fallback;
+
+  const hours = Math.floor(totalMins / 60);
+  const mins = totalMins % 60;
+
+  if (hours > 0) {
+    return `${hours}h ${mins}m`;
+  }
+  return `${mins}m`;
+};
+
+/**
  * Exports JSON data to an styled/clean Excel file (.xlsx)
  * @param {Array<Object>} data - Array of row objects
  * @param {string} fileName - Destination filename (without .xlsx extension)
@@ -181,7 +207,7 @@ const darkBorder = {
  * Helper to parse daily attendance details into structured columns:
  * Status, Leave/Over-Leave, Permission Hours, Late Coming, Fine Amount, Cleaned Remarks
  */
-export const parseDayDetails = (day = {}) => {
+export const parseDayDetails = (day = {}, employeeMeta = {}) => {
   const remarks = String(day.remarks || '').trim();
   const status = String(day.status || 'Present').trim();
   const statusLower = status.toLowerCase();
@@ -213,6 +239,45 @@ export const parseDayDetails = (day = {}) => {
     statusLower.includes('onsite') ||
     remLower.includes('on-site') ||
     remLower.includes('onsite');
+
+  // 1b. Detection of Work From Home (WFH)
+  const isWfh =
+    status === 'WFH' ||
+    status === 'WORK_FROM_HOME' ||
+    statusLower === 'wfh' ||
+    statusLower === 'work from home' ||
+    statusLower.includes('work from home') ||
+    statusLower.includes('wfh') ||
+    remLower.includes('wfh') ||
+    remLower.includes('work from home');
+
+  // 1c. Detection of Holiday & Weekly Off
+  const isHoliday =
+    status === 'Holiday' ||
+    statusLower === 'holiday' ||
+    statusLower.includes('holiday') ||
+    remLower.includes('holiday') ||
+    Boolean(day.is_holiday);
+
+  const isWeeklyOff =
+    status === 'WeeklyOff' ||
+    status === 'WO' ||
+    statusLower === 'weeklyoff' ||
+    statusLower === 'wo' ||
+    statusLower.includes('weekly') ||
+    Boolean(day.is_weekly_off) ||
+    (() => {
+      const dStr = day.date || day.date_str || day.iso_date || '';
+      if (dStr) {
+        try {
+          const dt = new Date(dStr);
+          return !isNaN(dt.getTime()) && dt.getDay() === 0;
+        } catch {
+          return false;
+        }
+      }
+      return false;
+    })();
 
   // 2. Waived penalty flag
   const isWaived =
@@ -259,6 +324,31 @@ export const parseDayDetails = (day = {}) => {
       if (mHr) permMins = Math.round(parseFloat(mHr[1]) * 60);
     }
   }
+  if (!permMins && remLower.includes('late perm:')) {
+    const m = remarks.match(/Late Perm:\s*(\d+)m?/i);
+    if (m) permMins = parseInt(m[1], 10);
+  }
+
+  // Fallback calculate late minutes if not explicitly provided:
+  // - Morning Grace Period: up to 09:40 AM is on time. After 09:40 AM, late minutes calculated from 09:40 AM.
+  // - Morning Permission: grace period does not apply. Calculated after 09:30 AM + permission_minutes.
+  if (!lateMins && hasInPunch && !isCheckoutOnly && !isWfh && !isOnDuty && !isOnSite && !isHoliday && !isWeeklyOff) {
+    const [inH, inM] = inTimeStr.split(':').map(Number);
+    if (!isNaN(inH) && !isNaN(inM)) {
+      const inTotalMins = inH * 60 + inM;
+      if (permMins > 0) {
+        const permittedInMins = (9 * 60 + 30) + permMins;
+        if (inTotalMins > permittedInMins) {
+          lateMins = inTotalMins - permittedInMins;
+        }
+      } else {
+        const graceCutoffMins = 9 * 60 + 40; // 09:40 AM
+        if (inTotalMins > graceCutoffMins) {
+          lateMins = inTotalMins - graceCutoffMins;
+        }
+      }
+    }
+  }
 
   // 5. Fine Amount & Fine Confirmed Flag (Waived penalty is never counted as confirmed fine)
   let fineAmt = 0;
@@ -294,13 +384,6 @@ export const parseDayDetails = (day = {}) => {
     statusLower.includes('half') ||
     remLower.includes('half day');
 
-  const isHoliday =
-    status === 'Holiday' ||
-    statusLower === 'holiday' ||
-    statusLower.includes('holiday') ||
-    remLower.includes('holiday') ||
-    Boolean(day.is_holiday);
-
   const isCasualLeave =
     status === 'Casual Leave' ||
     status === 'Leave' ||
@@ -332,7 +415,9 @@ export const parseDayDetails = (day = {}) => {
 
   // 7. Compact / Short Form Values
   let statusDisplay = status;
-  if (isOnDuty) {
+  if (isWfh) {
+    statusDisplay = 'WFH';
+  } else if (isOnDuty) {
     statusDisplay = 'On Duty';
   } else if (isOnSite) {
     statusDisplay = 'On Site';
@@ -350,13 +435,13 @@ export const parseDayDetails = (day = {}) => {
 
   let permDisplay = '--';
   if (permMins > 0) {
-    const hrs = (permMins / 60).toFixed(1).replace(/\.0$/, '');
-    permDisplay = `${hrs}h (${permMins}m)`;
+    permDisplay = formatMinutesToHM(permMins);
   }
 
   let lateDisplay = '--';
   if (lateMins > 0) {
-    lateDisplay = isWaived ? `${lateMins}m (Waived)` : `${lateMins}m`;
+    const formattedLate = formatMinutesToHM(lateMins);
+    lateDisplay = isWaived ? `${formattedLate} (Waived)` : formattedLate;
   }
 
   let fineDisplay = '--';
@@ -372,26 +457,83 @@ export const parseDayDetails = (day = {}) => {
   let cleanedRemarks = remarks
     .replace(/Late:\s*\d+\s*mins?/gi, '')
     .replace(/Permission:\s*\+?\d+(?:\.\d+)?\s*(?:mins?|hrs?)/gi, '')
+    .replace(/Late Perm:\s*\d+\s*mins?/gi, '')
+    .replace(/Late Perm:\s*\d+m/gi, '')
+    .replace(/Early Exit:\s*\d+m?/gi, '')
+    .replace(/Early Perm:\s*\d+m?/gi, '')
     .replace(/Fine Confirmed(?:\s*\([₹INRRs.\d]+\))?/gi, '')
+    .replace(/Fine Pending/gi, '')
+    .replace(/Fine Waived/gi, '')
     .replace(/Fine:\s*[₹INRRs.\d]+/gi, '')
     .replace(/\|\s*\|/g, '|')
     .replace(/^[\s|,-]+|[\s|,-]+$/g, '')
     .trim();
 
-  // Early exit evaluation:
-  // Crucial rule: If out punch was NOT recorded (missing out punch), NEVER mark as early exit!
+  // Early exit & early permission evaluation:
+  // Crucial rules:
+  // 1. If out punch was NOT recorded (missing out punch), NEVER mark as early exit!
+  // 2. Regular employee closing time is 19:30 (7:30 PM).
+  // 3. Designated employee closing time is 18:45 (6:45 PM) or custom assigned time.
+  // 4. If employee has permission (e.g. 30m, 45m, 60m, 120m), allowed departure time is shifted earlier:
+  //    allowedDeparture = assignedClosing - earlyPermission.
+  // 5. Exiting at or after allowedDeparture is ON TIME (0m early exit, ₹0 fine).
   let earlyExitMins = 0;
   let isEarlyExit = false;
-  if (hasOutPunch) {
-    // Check against standard 18:45 (6:45 PM) checkout threshold:
-    // If employee punched out at or after 18:45, they are ON TIME (earlyExitMins = 0).
+
+  let earlyPermMins = 0;
+  if (day.early_permission_minutes !== undefined && day.early_permission_minutes !== null && day.early_permission_minutes !== '') {
+    earlyPermMins = Number(day.early_permission_minutes) || 0;
+  }
+  if (!earlyPermMins && remLower.includes('early perm:')) {
+    const m = remarks.match(/Early Perm:\s*(\d+)m/i);
+    if (m) earlyPermMins = parseInt(m[1], 10);
+  }
+
+  if (day.early_exit_minutes !== undefined && day.early_exit_minutes !== null && day.early_exit_minutes !== '') {
+    earlyExitMins = Number(day.early_exit_minutes) || 0;
+    isEarlyExit = earlyExitMins > 0;
+  } else if (remLower.includes('early exit:')) {
+    const m = remarks.match(/Early Exit:\s*(\d+)m/i);
+    if (m) {
+      earlyExitMins = parseInt(m[1], 10);
+      isEarlyExit = earlyExitMins > 0;
+    }
+  } else if (hasOutPunch && !isWfh && !isOnDuty && !isOnSite && !isHoliday && !isWeeklyOff) {
+    let schedTime = day.scheduled_checkout || employeeMeta.scheduled_checkout || employeeMeta.shift_end_time;
+    if (!schedTime && employeeMeta.getEmployeeCheckoutTime) {
+      schedTime = employeeMeta.getEmployeeCheckoutTime(day.employee_code || employeeMeta.employee_code);
+    }
+    if (!schedTime) {
+      schedTime = '19:30';
+    }
+    const [schedH, schedM] = schedTime.split(':').map(Number);
+    const schedTotalMins = (isNaN(schedH) ? 19 : schedH) * 60 + (isNaN(schedM) ? 30 : schedM);
+
+    // Evening Early-Exit Permission: calculate permitted checkout from actual office closing time (18:30 / 6:30 PM = 1110 mins).
+    // e.g. 30m permission -> allowed exit from 18:00 (6:00 PM). Exits before 18:00 receive early exit penalty.
+    // Without evening permission: employees must follow assigned checkout time (19:30 or 18:45).
+    const baseExitMins = earlyPermMins > 0 ? (18 * 60 + 30) : schedTotalMins;
+    const allowedExitMins = Math.max(0, baseExitMins - earlyPermMins);
+
     const [outH, outM] = outTimeStr.split(':').map(Number);
     if (!isNaN(outH) && !isNaN(outM)) {
-      if (outH < 18 || (outH === 18 && outM < 45)) {
-        earlyExitMins = (18 * 60 + 45) - (outH * 60 + outM);
+      const outTotalMins = outH * 60 + outM;
+      if (outTotalMins < allowedExitMins) {
+        earlyExitMins = allowedExitMins - outTotalMins;
         isEarlyExit = earlyExitMins > 0;
       }
     }
+  }
+
+  let earlyExitDisplay = '--';
+  if (earlyExitMins > 0) {
+    const formattedEarly = formatMinutesToHM(earlyExitMins);
+    earlyExitDisplay = isWaived ? `${formattedEarly} (Waived)` : formattedEarly;
+  }
+
+  let earlyPermDisplay = '--';
+  if (earlyPermMins > 0) {
+    earlyPermDisplay = formatMinutesToHM(earlyPermMins);
   }
 
   return {
@@ -400,6 +542,10 @@ export const parseDayDetails = (day = {}) => {
     isWaived,
     permMins,
     permDisplay,
+    earlyExitMins,
+    earlyExitDisplay,
+    earlyPermMins,
+    earlyPermDisplay,
     fineAmt,
     fineDisplay,
     isFineConfirmed,
@@ -412,13 +558,13 @@ export const parseDayDetails = (day = {}) => {
     isOnDuty,
     isOnSite,
     isHoliday,
+    isWeeklyOff,
     statusDisplay,
     hasInPunch,
     hasOutPunch,
     isCheckoutOnly,
     isMissingOutPunch,
     isEarlyExit,
-    earlyExitMins,
     cleanedRemarks: cleanedRemarks || remarks,
   };
 };
@@ -446,20 +592,22 @@ export const exportETimeTrackLiteIndividualReport = async (employee, meta = {}) 
     { key: 'col1', width: 12 },  // Date
     { key: 'col2', width: 8 },   // In
     { key: 'col3', width: 8 },   // Out
-    { key: 'col4', width: 7 },   // Shift
+    { key: 'col4', width: 8 },   // Shift
     { key: 'col5', width: 9 },   // Total
     { key: 'col6', width: 11 },  // Status (Present / On Duty / On Site / WO / Absent)
-    { key: 'col7', width: 13 },  // Leave / LOP
-    { key: 'col8', width: 11 },  // Perm (Hr)
-    { key: 'col9', width: 13 },  // Late (e.g. 25m, 30m (Waived))
-    { key: 'col10', width: 10 }, // Fine (Red highlight)
-    { key: 'col11', width: 22 }, // Remarks
+    { key: 'col7', width: 12 },  // Leave / LOP
+    { key: 'col8', width: 12 },  // Late
+    { key: 'col9', width: 10 },  // Late Perm
+    { key: 'col10', width: 12 }, // Early Exit
+    { key: 'col11', width: 10 }, // Early Perm
+    { key: 'col12', width: 11 }, // Fine
+    { key: 'col13', width: 22 }, // Remarks
   ];
 
   let currRow = 1;
 
   // Row 1: Title (Centered, Bold)
-  worksheet.mergeCells(`A${currRow}:K${currRow}`);
+  worksheet.mergeCells(`A${currRow}:M${currRow}`);
   const titleCell = worksheet.getCell(`A${currRow}`);
   titleCell.value = 'Daily Attendance Report (Summary Report)';
   titleCell.font = { name: 'Arial', size: 12, bold: true };
@@ -467,7 +615,7 @@ export const exportETimeTrackLiteIndividualReport = async (employee, meta = {}) 
   currRow++;
 
   // Row 2: Date Range (Centered)
-  worksheet.mergeCells(`A${currRow}:K${currRow}`);
+  worksheet.mergeCells(`A${currRow}:M${currRow}`);
   const dateRangeCell = worksheet.getCell(`A${currRow}`);
   dateRangeCell.value = dateRangeStr;
   dateRangeCell.font = { name: 'Arial', size: 10, bold: false };
@@ -481,14 +629,14 @@ export const exportETimeTrackLiteIndividualReport = async (employee, meta = {}) 
   worksheet.getCell(`B${currRow}`).value = company;
   worksheet.getCell(`B${currRow}`).font = { name: 'Arial', size: 10, bold: false };
 
-  worksheet.mergeCells(`G${currRow}:K${currRow}`);
-  const printCell = worksheet.getCell(`G${currRow}`);
+  worksheet.mergeCells(`H${currRow}:M${currRow}`);
+  const printCell = worksheet.getCell(`H${currRow}`);
   printCell.value = `Printed On : ${printedOn}`;
   printCell.font = { name: 'Arial', size: 9, bold: false };
   printCell.alignment = { horizontal: 'right', vertical: 'middle' };
 
   // Bottom border line under Company header
-  for (let c = 1; c <= 11; c++) {
+  for (let c = 1; c <= 13; c++) {
     const cell = worksheet.getRow(currRow).getCell(c);
     cell.border = {
       ...cell.border,
@@ -510,7 +658,7 @@ export const exportETimeTrackLiteIndividualReport = async (employee, meta = {}) 
   worksheet.getCell(`D${currRow}`).value = 'Employee Name :';
   worksheet.getCell(`D${currRow}`).font = { name: 'Arial', size: 10, bold: true };
 
-  worksheet.mergeCells(`E${currRow}:K${currRow}`);
+  worksheet.mergeCells(`E${currRow}:M${currRow}`);
   const empNameCell = worksheet.getCell(`E${currRow}`);
   empNameCell.value = employee.employee_name;
   empNameCell.font = { name: 'Arial', size: 10, bold: true };
@@ -526,8 +674,10 @@ export const exportETimeTrackLiteIndividualReport = async (employee, meta = {}) 
     'Total',
     'Status',
     'Leave / LOP',
-    'Perm (Hr)',
     'Late',
+    'Late Perm',
+    'Early Exit',
+    'Early Perm',
     'Fine',
     'Remarks',
   ];
@@ -538,7 +688,7 @@ export const exportETimeTrackLiteIndividualReport = async (employee, meta = {}) 
     cell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
     cell.alignment = {
-      horizontal: idx < 10 ? 'center' : 'left',
+      horizontal: idx < 12 ? 'center' : 'left',
       vertical: 'middle',
     };
     cell.border = darkBorder;
@@ -546,10 +696,15 @@ export const exportETimeTrackLiteIndividualReport = async (employee, meta = {}) 
   currRow++;
 
   let totalPermMins = 0;
+  let totalEarlyPermMins = 0;
+  let totalEarlyExitMins = 0;
+  let totalLateMins = 0;
   let totalFineAmt = 0;
   let finesCount = 0;
   let lateDaysCount = 0;
+  let earlyExitDaysCount = 0;
   let permDaysCount = 0;
+  let earlyPermDaysCount = 0;
   let overLeaveDaysCount = 0;
   let halfDaysCount = 0;
   let onDutyDaysCount = 0;
@@ -565,7 +720,7 @@ export const exportETimeTrackLiteIndividualReport = async (employee, meta = {}) 
     const totalDuration = day.total_duration || day.duration_str || '00:00';
     const status = day.status || 'Present';
 
-    const parsed = parseDayDetails(day);
+    const parsed = parseDayDetails(day, employee);
 
     if (parsed.isOnDuty) onDutyDaysCount++;
     if (parsed.isOnSite) onSiteDaysCount++;
@@ -573,8 +728,17 @@ export const exportETimeTrackLiteIndividualReport = async (employee, meta = {}) 
       totalPermMins += parsed.permMins;
       permDaysCount++;
     }
+    if (parsed.earlyPermMins > 0) {
+      totalEarlyPermMins += parsed.earlyPermMins;
+      earlyPermDaysCount++;
+    }
     if (parsed.lateMins > 0) {
       lateDaysCount++;
+      totalLateMins += parsed.lateMins;
+    }
+    if (parsed.earlyExitMins > 0) {
+      earlyExitDaysCount++;
+      totalEarlyExitMins += parsed.earlyExitMins;
     }
     if (parsed.fineAmt > 0 || parsed.isFineConfirmed) {
       totalFineAmt += parsed.fineAmt;
@@ -595,8 +759,10 @@ export const exportETimeTrackLiteIndividualReport = async (employee, meta = {}) 
       totalDuration,
       parsed.statusDisplay,
       parsed.leaveDisplay,
-      parsed.permDisplay,
       parsed.lateDisplay,
+      parsed.permDisplay,
+      parsed.earlyExitDisplay,
+      parsed.earlyPermDisplay,
       parsed.fineDisplay,
       parsed.cleanedRemarks || '--',
     ];
@@ -606,7 +772,7 @@ export const exportETimeTrackLiteIndividualReport = async (employee, meta = {}) 
       cell.value = val;
       cell.font = { name: 'Arial', size: 9 };
       cell.alignment = {
-        horizontal: idx < 10 ? 'center' : 'left',
+        horizontal: idx < 12 ? 'center' : 'left',
         vertical: 'middle',
       };
       cell.border = darkBorder;
@@ -650,14 +816,8 @@ export const exportETimeTrackLiteIndividualReport = async (employee, meta = {}) 
         }
       }
 
-      // 3. Permission (Hr) Column
-      if (idx === 7 && parsed.permMins > 0) {
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEEF2FF' } };
-        cell.font = { name: 'Arial', size: 9, bold: true, color: { argb: 'FF3730A3' } };
-      }
-
-      // 4. Late Column: Show minutes even for Waived; highlight Red if fine, Amber if normal late, Slate if waived
-      if (idx === 8 && parsed.lateMins > 0) {
+      // 3. Late Column: Show minutes even for Waived; highlight Red if fine, Amber if normal late, Slate if waived
+      if (idx === 7 && parsed.lateMins > 0) {
         if (parsed.fineAmt > 0 || parsed.isFineConfirmed) {
           cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } };
           cell.font = { name: 'Arial', size: 9, bold: true, color: { argb: 'FFB91C1C' } };
@@ -670,8 +830,34 @@ export const exportETimeTrackLiteIndividualReport = async (employee, meta = {}) 
         }
       }
 
-      // 5. Fine Column: RED SHOW HIGHLIGHT for Fines; Soft Green for Waived
-      if (idx === 9) {
+      // 4. Late Perm Column
+      if (idx === 8 && parsed.permMins > 0) {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEEF2FF' } };
+        cell.font = { name: 'Arial', size: 9, bold: true, color: { argb: 'FF3730A3' } };
+      }
+
+      // 5. Early Exit Column (Bold Red for early exits, slate if waived)
+      if (idx === 9 && parsed.earlyExitMins > 0) {
+        if (parsed.fineAmt > 0 || parsed.isFineConfirmed) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } };
+          cell.font = { name: 'Arial', size: 9, bold: true, color: { argb: 'FF991B1B' } };
+        } else if (parsed.isWaived) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+          cell.font = { name: 'Arial', size: 9, color: { argb: 'FF475569' } };
+        } else {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE4E6' } };
+          cell.font = { name: 'Arial', size: 9, bold: true, color: { argb: 'FF9F1239' } };
+        }
+      }
+
+      // 6. Early Perm Column
+      if (idx === 10 && parsed.earlyPermMins > 0) {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3E8FF' } };
+        cell.font = { name: 'Arial', size: 9, bold: true, color: { argb: 'FF6B21A8' } };
+      }
+
+      // 7. Fine Column: RED SHOW HIGHLIGHT for Fines; Soft Green for Waived
+      if (idx === 11) {
         if (parsed.fineAmt > 0 || parsed.isFineConfirmed) {
           cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } };
           cell.font = { name: 'Arial', size: 9.5, bold: true, color: { argb: 'FFDC2626' } };
@@ -685,18 +871,19 @@ export const exportETimeTrackLiteIndividualReport = async (employee, meta = {}) 
     currRow++;
   });
 
-  // Summary Row: Total Duration, PresentDays, On Duty, On Site, Leaves, Over-Leave, Holiday, AbsentDays, Weekly Off, Permissions, Fines
+  // Summary Row: Total Duration, PresentDays, On Duty, On Site, Leaves, Over-Leave, Holiday, AbsentDays, Weekly Off, Late, Early Exit, Permissions, Fines
   const totalDur = employee.total_duration_formatted || employee.total_duration_str || '0 Hrs 0 Min';
   const presentDays = employee.present_days ?? 0;
   const leaves = employee.leaves ?? employee.leave_days ?? 0;
   const holiday = employee.holiday ?? employee.holiday_days ?? 0;
   const absentDays = employee.absent_days ?? 0;
   const weeklyOff = employee.weekly_off ?? employee.weekly_off_days ?? 0;
-  const totalPermHrs = (totalPermMins / 60).toFixed(1).replace(/\.0$/, '');
+  const totalPermDuration = totalPermMins > 0 ? formatMinutesToHM(totalPermMins) : '0m';
+  const totalEarlyPermDuration = totalEarlyPermMins > 0 ? formatMinutesToHM(totalEarlyPermMins) : '0m';
 
   const hasAlert = overLeaveDaysCount > 0 || absentDays > 0 || totalFineAmt > 0;
 
-  worksheet.mergeCells(`A${currRow}:K${currRow}`);
+  worksheet.mergeCells(`A${currRow}:M${currRow}`);
   const summaryCell = worksheet.getCell(`A${currRow}`);
 
   let summaryText = `Total Duration=${totalDur} , PresentDays=${presentDays}`;
@@ -705,8 +892,10 @@ export const exportETimeTrackLiteIndividualReport = async (employee, meta = {}) 
   summaryText += ` , Leaves=${leaves}`;
   if (overLeaveDaysCount > 0) summaryText += ` [Over-Leave=${overLeaveDaysCount}]`;
   summaryText += ` , Holiday=${holiday} , AbsentDays=${absentDays} , Weekly Off=${weeklyOff}`;
-  if (permDaysCount > 0) summaryText += ` , Permissions=${permDaysCount} (${totalPermHrs} hrs)`;
-  if (lateDaysCount > 0) summaryText += ` , Late Days=${lateDaysCount}`;
+  if (lateDaysCount > 0) summaryText += ` , Late Days=${lateDaysCount} (${formatMinutesToHM(totalLateMins)})`;
+  if (earlyExitDaysCount > 0) summaryText += ` , Early Exit Days=${earlyExitDaysCount} (${formatMinutesToHM(totalEarlyExitMins)})`;
+  if (permDaysCount > 0) summaryText += ` , Late Perms=${permDaysCount} (${totalPermDuration})`;
+  if (earlyPermDaysCount > 0) summaryText += ` , Early Perms=${earlyPermDaysCount} (${totalEarlyPermDuration})`;
   if (finesCount > 0) summaryText += ` , Confirmed Fines=${finesCount} (₹${totalFineAmt})`;
 
   summaryCell.value = summaryText;
@@ -723,7 +912,7 @@ export const exportETimeTrackLiteIndividualReport = async (employee, meta = {}) 
   };
   summaryCell.alignment = { horizontal: 'left', vertical: 'middle' };
 
-  for (let c = 1; c <= 11; c++) {
+  for (let c = 1; c <= 13; c++) {
     worksheet.getRow(currRow).getCell(c).border = darkBorder;
   }
   currRow++;
@@ -755,20 +944,22 @@ export const exportETimeTrackLiteOverallReport = async (reportData, fileName = '
     { key: 'col1', width: 12 },  // Date
     { key: 'col2', width: 8 },   // In
     { key: 'col3', width: 8 },   // Out
-    { key: 'col4', width: 7 },   // Shift
+    { key: 'col4', width: 8 },   // Shift
     { key: 'col5', width: 9 },   // Total
     { key: 'col6', width: 11 },  // Status (Present / On Duty / On Site / WO / Absent)
-    { key: 'col7', width: 13 },  // Leave / LOP
-    { key: 'col8', width: 11 },  // Perm (Hr)
-    { key: 'col9', width: 13 },  // Late (e.g. 25m, 30m (Waived))
-    { key: 'col10', width: 10 }, // Fine (Red highlight)
-    { key: 'col11', width: 22 }, // Remarks
+    { key: 'col7', width: 12 },  // Leave / LOP
+    { key: 'col8', width: 12 },  // Late
+    { key: 'col9', width: 10 },  // Late Perm
+    { key: 'col10', width: 12 }, // Early Exit
+    { key: 'col11', width: 10 }, // Early Perm
+    { key: 'col12', width: 11 }, // Fine
+    { key: 'col13', width: 22 }, // Remarks
   ];
 
   let currRow = 1;
 
   // Row 1: Title (Centered, Bold)
-  worksheet.mergeCells(`A${currRow}:K${currRow}`);
+  worksheet.mergeCells(`A${currRow}:M${currRow}`);
   const titleCell = worksheet.getCell(`A${currRow}`);
   titleCell.value = 'Daily Attendance Report (Summary Report)';
   titleCell.font = { name: 'Arial', size: 12, bold: true };
@@ -776,7 +967,7 @@ export const exportETimeTrackLiteOverallReport = async (reportData, fileName = '
   currRow++;
 
   // Row 2: Date Range (Centered)
-  worksheet.mergeCells(`A${currRow}:K${currRow}`);
+  worksheet.mergeCells(`A${currRow}:M${currRow}`);
   const dateRangeCell = worksheet.getCell(`A${currRow}`);
   dateRangeCell.value = dateRangeStr;
   dateRangeCell.font = { name: 'Arial', size: 10, bold: false };
@@ -790,14 +981,14 @@ export const exportETimeTrackLiteOverallReport = async (reportData, fileName = '
   worksheet.getCell(`B${currRow}`).value = company;
   worksheet.getCell(`B${currRow}`).font = { name: 'Arial', size: 10, bold: false };
 
-  worksheet.mergeCells(`G${currRow}:K${currRow}`);
-  const printCell = worksheet.getCell(`G${currRow}`);
+  worksheet.mergeCells(`H${currRow}:M${currRow}`);
+  const printCell = worksheet.getCell(`H${currRow}`);
   printCell.value = `Printed On : ${printedOn}`;
   printCell.font = { name: 'Arial', size: 9, bold: false };
   printCell.alignment = { horizontal: 'right', vertical: 'middle' };
 
   // Bottom border line under Company header
-  for (let c = 1; c <= 11; c++) {
+  for (let c = 1; c <= 13; c++) {
     const cell = worksheet.getRow(currRow).getCell(c);
     cell.border = {
       ...cell.border,
@@ -814,8 +1005,10 @@ export const exportETimeTrackLiteOverallReport = async (reportData, fileName = '
     'Total',
     'Status',
     'Leave / LOP',
-    'Perm (Hr)',
     'Late',
+    'Late Perm',
+    'Early Exit',
+    'Early Perm',
     'Fine',
     'Remarks',
   ];
@@ -835,7 +1028,7 @@ export const exportETimeTrackLiteOverallReport = async (reportData, fileName = '
     worksheet.getCell(`D${currRow}`).value = 'Employee Name :';
     worksheet.getCell(`D${currRow}`).font = { name: 'Arial', size: 10, bold: true };
 
-    worksheet.mergeCells(`E${currRow}:K${currRow}`);
+    worksheet.mergeCells(`E${currRow}:M${currRow}`);
     const empNameCell = worksheet.getCell(`E${currRow}`);
     empNameCell.value = emp.employee_name;
     empNameCell.font = { name: 'Arial', size: 10, bold: true };
@@ -850,7 +1043,7 @@ export const exportETimeTrackLiteOverallReport = async (reportData, fileName = '
       cell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
       cell.alignment = {
-        horizontal: idx < 10 ? 'center' : 'left',
+        horizontal: idx < 12 ? 'center' : 'left',
         vertical: 'middle',
       };
       cell.border = darkBorder;
@@ -858,10 +1051,15 @@ export const exportETimeTrackLiteOverallReport = async (reportData, fileName = '
     currRow++;
 
     let totalPermMins = 0;
+    let totalEarlyPermMins = 0;
+    let totalEarlyExitMins = 0;
+    let totalLateMins = 0;
     let totalFineAmt = 0;
     let finesCount = 0;
     let lateDaysCount = 0;
+    let earlyExitDaysCount = 0;
     let permDaysCount = 0;
+    let earlyPermDaysCount = 0;
     let overLeaveDaysCount = 0;
     let halfDaysCount = 0;
     let onDutyDaysCount = 0;
@@ -877,7 +1075,7 @@ export const exportETimeTrackLiteOverallReport = async (reportData, fileName = '
       const totalDuration = day.total_duration || day.duration_str || '00:00';
       const status = day.status || 'Present';
 
-      const parsed = parseDayDetails(day);
+      const parsed = parseDayDetails(day, emp);
 
       if (parsed.isOnDuty) onDutyDaysCount++;
       if (parsed.isOnSite) onSiteDaysCount++;
@@ -885,8 +1083,17 @@ export const exportETimeTrackLiteOverallReport = async (reportData, fileName = '
         totalPermMins += parsed.permMins;
         permDaysCount++;
       }
+      if (parsed.earlyPermMins > 0) {
+        totalEarlyPermMins += parsed.earlyPermMins;
+        earlyPermDaysCount++;
+      }
       if (parsed.lateMins > 0) {
         lateDaysCount++;
+        totalLateMins += parsed.lateMins;
+      }
+      if (parsed.earlyExitMins > 0) {
+        earlyExitDaysCount++;
+        totalEarlyExitMins += parsed.earlyExitMins;
       }
       if (parsed.fineAmt > 0 || parsed.isFineConfirmed) {
         totalFineAmt += parsed.fineAmt;
@@ -907,8 +1114,10 @@ export const exportETimeTrackLiteOverallReport = async (reportData, fileName = '
         totalDuration,
         parsed.statusDisplay,
         parsed.leaveDisplay,
-        parsed.permDisplay,
         parsed.lateDisplay,
+        parsed.permDisplay,
+        parsed.earlyExitDisplay,
+        parsed.earlyPermDisplay,
         parsed.fineDisplay,
         parsed.cleanedRemarks || '--',
       ];
@@ -918,7 +1127,7 @@ export const exportETimeTrackLiteOverallReport = async (reportData, fileName = '
         cell.value = val;
         cell.font = { name: 'Arial', size: 9 };
         cell.alignment = {
-          horizontal: idx < 10 ? 'center' : 'left',
+          horizontal: idx < 12 ? 'center' : 'left',
           vertical: 'middle',
         };
         cell.border = darkBorder;
@@ -960,14 +1169,8 @@ export const exportETimeTrackLiteOverallReport = async (reportData, fileName = '
           }
         }
 
-        // 3. Permission (Hr) Column
-        if (idx === 7 && parsed.permMins > 0) {
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEEF2FF' } };
-          cell.font = { name: 'Arial', size: 9, bold: true, color: { argb: 'FF3730A3' } };
-        }
-
-        // 4. Late Column: Show minutes even for Waived; highlight Red if fine, Amber if normal late, Slate if waived
-        if (idx === 8 && parsed.lateMins > 0) {
+        // 3. Late Column
+        if (idx === 7 && parsed.lateMins > 0) {
           if (parsed.fineAmt > 0 || parsed.isFineConfirmed) {
             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } };
             cell.font = { name: 'Arial', size: 9, bold: true, color: { argb: 'FFB91C1C' } };
@@ -980,8 +1183,34 @@ export const exportETimeTrackLiteOverallReport = async (reportData, fileName = '
           }
         }
 
-        // 5. Fine Column: RED SHOW HIGHLIGHT for Fines; Soft Green for Waived
-        if (idx === 9) {
+        // 4. Late Perm Column
+        if (idx === 8 && parsed.permMins > 0) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEEF2FF' } };
+          cell.font = { name: 'Arial', size: 9, bold: true, color: { argb: 'FF3730A3' } };
+        }
+
+        // 5. Early Exit Column (Bold Red for early exits, slate if waived)
+        if (idx === 9 && parsed.earlyExitMins > 0) {
+          if (parsed.fineAmt > 0 || parsed.isFineConfirmed) {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } };
+            cell.font = { name: 'Arial', size: 9, bold: true, color: { argb: 'FF991B1B' } };
+          } else if (parsed.isWaived) {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+            cell.font = { name: 'Arial', size: 9, color: { argb: 'FF475569' } };
+          } else {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE4E6' } };
+            cell.font = { name: 'Arial', size: 9, bold: true, color: { argb: 'FF9F1239' } };
+          }
+        }
+
+        // 6. Early Perm Column
+        if (idx === 10 && parsed.earlyPermMins > 0) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3E8FF' } };
+          cell.font = { name: 'Arial', size: 9, bold: true, color: { argb: 'FF6B21A8' } };
+        }
+
+        // 7. Fine Column
+        if (idx === 11) {
           if (parsed.fineAmt > 0 || parsed.isFineConfirmed) {
             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } };
             cell.font = { name: 'Arial', size: 9.5, bold: true, color: { argb: 'FFDC2626' } };
@@ -995,18 +1224,19 @@ export const exportETimeTrackLiteOverallReport = async (reportData, fileName = '
       currRow++;
     });
 
-    // Summary Row: Total Duration, PresentDays, On Duty, On Site, Leaves, Over-Leave, Holiday, AbsentDays, Weekly Off, Permissions, Fines
+    // Summary Row: Total Duration, PresentDays, On Duty, On Site, Leaves, Over-Leave, Holiday, AbsentDays, Weekly Off, Late, Early Exit, Permissions, Fines
     const totalDur = emp.total_duration_formatted || emp.total_duration_str || '0 Hrs 0 Min';
     const presentDays = emp.present_days ?? 0;
     const leaves = emp.leaves ?? emp.leave_days ?? 0;
     const holiday = emp.holiday ?? emp.holiday_days ?? 0;
     const absentDays = emp.absent_days ?? 0;
     const weeklyOff = emp.weekly_off ?? emp.weekly_off_days ?? 0;
-    const totalPermHrs = (totalPermMins / 60).toFixed(1).replace(/\.0$/, '');
+    const totalPermDuration = totalPermMins > 0 ? formatMinutesToHM(totalPermMins) : '0m';
+    const totalEarlyPermDuration = totalEarlyPermMins > 0 ? formatMinutesToHM(totalEarlyPermMins) : '0m';
 
     const hasAlert = overLeaveDaysCount > 0 || absentDays > 0 || totalFineAmt > 0;
 
-    worksheet.mergeCells(`A${currRow}:K${currRow}`);
+    worksheet.mergeCells(`A${currRow}:M${currRow}`);
     const summaryCell = worksheet.getCell(`A${currRow}`);
 
     let summaryText = `Total Duration=${totalDur} , PresentDays=${presentDays}`;
@@ -1015,8 +1245,10 @@ export const exportETimeTrackLiteOverallReport = async (reportData, fileName = '
     summaryText += ` , Leaves=${leaves}`;
     if (overLeaveDaysCount > 0) summaryText += ` [Over-Leave=${overLeaveDaysCount}]`;
     summaryText += ` , Holiday=${holiday} , AbsentDays=${absentDays} , Weekly Off=${weeklyOff}`;
-    if (permDaysCount > 0) summaryText += ` , Permissions=${permDaysCount} (${totalPermHrs} hrs)`;
-    if (lateDaysCount > 0) summaryText += ` , Late Days=${lateDaysCount}`;
+    if (lateDaysCount > 0) summaryText += ` , Late Days=${lateDaysCount} (${formatMinutesToHM(totalLateMins)})`;
+    if (earlyExitDaysCount > 0) summaryText += ` , Early Exit Days=${earlyExitDaysCount} (${formatMinutesToHM(totalEarlyExitMins)})`;
+    if (permDaysCount > 0) summaryText += ` , Late Perms=${permDaysCount} (${totalPermDuration})`;
+    if (earlyPermDaysCount > 0) summaryText += ` , Early Perms=${earlyPermDaysCount} (${totalEarlyPermDuration})`;
     if (finesCount > 0) summaryText += ` , Confirmed Fines=${finesCount} (₹${totalFineAmt})`;
 
     summaryCell.value = summaryText;
@@ -1033,7 +1265,7 @@ export const exportETimeTrackLiteOverallReport = async (reportData, fileName = '
     };
     summaryCell.alignment = { horizontal: 'left', vertical: 'middle' };
 
-    for (let c = 1; c <= 11; c++) {
+    for (let c = 1; c <= 13; c++) {
       worksheet.getRow(currRow).getCell(c).border = darkBorder;
     }
     currRow++;
@@ -1152,12 +1384,12 @@ export const exportDailyAttendanceExcel = async (records = [], targetDate, meta 
     'First Check IN',
     'Last Check OUT',
     'Scheduled OUT',
-    'Early Checkout (Mins)',
-    'Late Minutes',
-    'Permission (Mins)',
+    'Early Checkout',
+    'Late Delay',
+    'Permission Duration',
     'Fine Status',
     'Fine Amount (INR)',
-    'Total Working Minutes',
+    'Total Working Duration',
     'Attendance Status',
     'Confirmation Status',
     'Remarks',
@@ -1190,9 +1422,10 @@ export const exportDailyAttendanceExcel = async (records = [], targetDate, meta 
     const schedOut = meta.getEmployeeCheckoutTime ? meta.getEmployeeCheckoutTime(rec.employee_code) : '19:30';
     const firstInStr = rec.first_in ? formatTimeDisplay(rec.first_in) : 'Missing Punch';
     const lastOutStr = rec.last_out && rec.last_out !== rec.first_in ? formatTimeDisplay(rec.last_out) : 'Not Checked Out';
+    const earlyMins = rec.early_exit_minutes || rec.early_checkout_mins || 0;
     const fineAmt = rec.fine_amount ? Number(rec.fine_amount) : 0;
     if (fineAmt > 0 && rec.fine_status === 'CONFIRMED') totalFines += fineAmt;
-    if (rec.first_in || rec.is_on_site || rec.is_on_field || rec.status === 'PRESENT_CONFIRMED' || rec.status === 'ON_DUTY') totalPresent++;
+    if (rec.first_in || rec.is_on_site || rec.is_on_field || rec.status === 'PRESENT_CONFIRMED' || rec.status === 'ON_DUTY' || rec.status === 'WFH' || rec.review_status === 'WFH') totalPresent++;
 
     const rowValues = [
       idx + 1,
@@ -1203,15 +1436,15 @@ export const exportDailyAttendanceExcel = async (records = [], targetDate, meta 
       firstInStr,
       lastOutStr,
       schedOut === '19:30' ? '07:30 PM (Std)' : '06:45 PM (Special)',
-      rec.early_checkout_mins || 0,
-      rec.late_minutes || 0,
-      rec.permission_minutes || 0,
+      earlyMins > 0 ? formatMinutesToHM(earlyMins) : '0m',
+      rec.late_minutes ? formatMinutesToHM(rec.late_minutes) : '0m',
+      rec.permission_minutes ? formatMinutesToHM(rec.permission_minutes) : '0m',
       rec.fine_status || 'NONE',
       fineAmt,
-      rec.total_minutes || 0,
-      rec.status || 'UNPROCESSED',
+      rec.total_minutes ? formatMinutesToHM(rec.total_minutes) : '0m',
+      rec.review_status === 'WFH' ? 'WFH' : rec.status || 'UNPROCESSED',
       rec.review_status || 'UNCONFIRMED',
-      rec.review_reason || '',
+      rec.review_reason || (earlyMins > 0 ? `Early exit: ${formatMinutesToHM(earlyMins)}` : ''),
     ];
 
     rowValues.forEach((val, cIdx) => {
@@ -1220,6 +1453,24 @@ export const exportDailyAttendanceExcel = async (records = [], targetDate, meta 
       cell.font = { name: 'Arial', size: 9 };
       if (!isEven) {
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+      }
+
+      // Highlight Early Exit column in prominent soft-red fill & bold red font
+      if (cIdx === 8 && earlyMins > 0) {
+        cell.font = { name: 'Arial', size: 9, bold: true, color: { argb: 'FF991B1B' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } };
+      }
+
+      // Highlight Confirmed Fines in soft red
+      if (cIdx === 12 && fineAmt > 0) {
+        cell.font = { name: 'Arial', size: 9, bold: true, color: { argb: 'FF991B1B' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } };
+      }
+
+      // Highlight WFH in cyan fill & bold text
+      if ((cIdx === 14 || cIdx === 15) && (val === 'WFH' || val === 'WORK_FROM_HOME')) {
+        cell.font = { name: 'Arial', size: 9, bold: true, color: { argb: 'FF0E7490' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFECFEFF' } };
       }
       cell.alignment = {
         horizontal: cIdx === 0 || cIdx === 1 || cIdx === 3 || cIdx === 4 || cIdx === 5 || cIdx === 6 || cIdx === 7 || cIdx === 11 || cIdx === 14 || cIdx === 15 ? 'center' : cIdx >= 8 && cIdx <= 13 ? 'right' : 'left',
@@ -1433,6 +1684,9 @@ export const exportMonthlyAttendanceExcel = async (monthlyData, month, year, met
     if (s === 'On Duty') {
       return { fg: 'FFCCFBF1', text: 'FF0F766E', bold: false }; // Soft Teal
     }
+    if (s === 'WFH' || s === 'Work From Home' || s === 'WORK_FROM_HOME') {
+      return { fg: 'FFE0F7FA', text: 'FF006064', bold: false }; // Soft Cyan
+    }
     if (s === 'Holiday' || s === 'HOLIDAY') {
       return { fg: 'FFF3E8FF', text: 'FF6B21A8', bold: true }; // Soft Purple
     }
@@ -1521,7 +1775,7 @@ export const exportMonthlyAttendanceExcel = async (monthlyData, month, year, met
       const style = getStatusStyle(rawStatus);
 
       // Tally counters
-      if (rawStatus === 'Present' || rawStatus === 'Present (No OutPunch)' || rawStatus === 'On Duty') {
+      if (rawStatus === 'Present' || rawStatus === 'Present (No OutPunch)' || rawStatus === 'On Duty' || rawStatus === 'WFH') {
         empCounts.present++;
       } else if (rawStatus === 'Onsite' || rawStatus === 'On-Site' || rawStatus === 'ON_SITE' || rawStatus === 'Onfield' || rawStatus === 'On-Field' || rawStatus === 'ON_FIELD') {
         empCounts.onsite++;
@@ -1613,32 +1867,35 @@ export const exportDailyLateFinesExcel = async (records = [], targetDate, meta =
   const formattedDate = formatReportDateStr(targetDate);
 
   const workbook = new ExcelJS.Workbook();
-  const worksheet = workbook.addWorksheet('Daily_Late_Fines', {
+  const worksheet = workbook.addWorksheet('Daily_Late_Early_Fines', {
     pageSetup: { orientation: 'landscape', fitToPage: true },
   });
 
   worksheet.columns = [
-    { key: 'sno', width: 8 },
-    { key: 'emp_code', width: 16 },
-    { key: 'emp_name', width: 28 },
-    { key: 'date', width: 16 },
-    { key: 'in_time', width: 16 },
-    { key: 'shift_start', width: 16 },
-    { key: 'allowed_cutoff', width: 16 },
-    { key: 'perm_mins', width: 18 },
-    { key: 'late_mins', width: 16 },
-    { key: 'fine_status', width: 18 },
-    { key: 'fine_amount', width: 18 },
-    { key: 'review_status', width: 20 },
-    { key: 'remarks', width: 32 },
+    { key: 'sno', width: 6 },
+    { key: 'emp_code', width: 14 },
+    { key: 'emp_name', width: 24 },
+    { key: 'date', width: 13 },
+    { key: 'in_time', width: 12 },
+    { key: 'shift_start', width: 11 },
+    { key: 'late_mins', width: 13 },
+    { key: 'late_perm', width: 11 },
+    { key: 'out_time', width: 12 },
+    { key: 'shift_end', width: 11 },
+    { key: 'early_exit_mins', width: 13 },
+    { key: 'early_perm', width: 11 },
+    { key: 'fine_status', width: 14 },
+    { key: 'fine_amount', width: 14 },
+    { key: 'review_status', width: 16 },
+    { key: 'remarks', width: 26 },
   ];
 
   let currRow = 1;
 
   // Title
-  worksheet.mergeCells(`A${currRow}:M${currRow}`);
+  worksheet.mergeCells(`A${currRow}:P${currRow}`);
   const titleCell = worksheet.getCell(`A${currRow}`);
-  titleCell.value = `${company} - Daily Late Check-In & Penalty Assessment Register`;
+  titleCell.value = `${company} - Daily Late Arrival & Early Exit Penalty Register`;
   titleCell.font = { name: 'Arial', size: 13, bold: true, color: { argb: 'FFFFFFFF' } };
   titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF991B1B' } }; // Dark Crimson
   titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
@@ -1646,12 +1903,13 @@ export const exportDailyLateFinesExcel = async (records = [], targetDate, meta =
   currRow++;
 
   const lateCount = records.filter((r) => r.first_in && r.late_minutes > 0).length;
+  const earlyCount = records.filter((r) => r.last_out && r.early_exit_minutes > 0).length;
   const totalFineAmt = records.reduce((acc, r) => acc + (r.fine_status === 'CONFIRMED' && r.fine_amount ? Number(r.fine_amount) : 0), 0);
 
   // Subtitle
-  worksheet.mergeCells(`A${currRow}:M${currRow}`);
+  worksheet.mergeCells(`A${currRow}:P${currRow}`);
   const subCell = worksheet.getCell(`A${currRow}`);
-  subCell.value = `Attendance Date: ${formattedDate}  |  Monitored Workforce: ${records.length}  |  Late Arrivals: ${lateCount}  |  Confirmed Penalties: INR ${totalFineAmt.toLocaleString()}  |  Generated On: ${printedOn}`;
+  subCell.value = `Attendance Date: ${formattedDate}  |  Monitored Workforce: ${records.length}  |  Late Arrivals: ${lateCount}  |  Early Exits: ${earlyCount}  |  Confirmed Penalties: INR ${totalFineAmt.toLocaleString()}  |  Generated On: ${printedOn}`;
   subCell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF7F1D1D' } };
   subCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF2F2' } };
   subCell.alignment = { horizontal: 'center', vertical: 'middle' };
@@ -1666,9 +1924,12 @@ export const exportDailyLateFinesExcel = async (records = [], targetDate, meta =
     'Attendance Date',
     'First Check IN',
     'Shift Start',
-    'Allowed Cutoff',
-    'Permission (Mins)',
-    'Late Minutes',
+    'Late Duration',
+    'Late Perm',
+    'Last Check OUT',
+    'Shift End',
+    'Early Exit',
+    'Early Perm',
     'Fine Status',
     'Fine Amount (INR)',
     'Review Status',
@@ -1683,7 +1944,7 @@ export const exportDailyLateFinesExcel = async (records = [], targetDate, meta =
     cell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF334155' } };
     cell.alignment = {
-      horizontal: idx === 0 || idx === 1 || idx === 3 || idx === 4 || idx === 5 || idx === 6 || idx === 9 || idx === 11 ? 'center' : idx === 7 || idx === 8 || idx === 10 ? 'right' : 'left',
+      horizontal: idx === 0 || idx === 1 || idx === 3 || idx === 4 || idx === 5 || idx === 7 || idx === 8 || idx === 9 || idx === 11 || idx === 12 || idx === 14 ? 'center' : idx === 6 || idx === 10 || idx === 13 ? 'right' : 'left',
       vertical: 'middle',
     };
     cell.border = darkBorder;
@@ -1696,9 +1957,11 @@ export const exportDailyLateFinesExcel = async (records = [], targetDate, meta =
     const isEven = idx % 2 === 0;
 
     const inTimeStr = rec.first_in ? formatTimeDisplay(rec.first_in) : 'Not Punched';
+    const outTimeStr = rec.last_out ? formatTimeDisplay(rec.last_out) : 'Not Punched';
     const shiftStartStr = rec.shift_start_time ? String(rec.shift_start_time).slice(0, 5) : '09:30';
-    const allowedUntilStr = rec.allowed_until ? String(rec.allowed_until).slice(0, 5) : '09:40';
+    const shiftEndStr = rec.scheduled_checkout ? String(rec.scheduled_checkout).slice(0, 5) : (meta.getEmployeeCheckoutTime ? meta.getEmployeeCheckoutTime(rec.employee_code) : '19:30');
     const fineAmt = rec.fine_amount ? Number(rec.fine_amount) : 0;
+    const isWaived = rec.fine_status === 'WAIVED';
 
     const rowValues = [
       idx + 1,
@@ -1707,13 +1970,16 @@ export const exportDailyLateFinesExcel = async (records = [], targetDate, meta =
       formattedDate,
       inTimeStr,
       shiftStartStr,
-      allowedUntilStr,
-      rec.permission_minutes || 0,
-      rec.first_in ? rec.late_minutes || 0 : 0,
-      rec.fine_status || (!rec.first_in ? 'NONE' : rec.late_minutes > 0 ? 'PENDING' : 'NONE'),
+      rec.first_in && rec.late_minutes ? formatMinutesToHM(rec.late_minutes) : '0m',
+      rec.permission_minutes ? formatMinutesToHM(rec.permission_minutes) : '0m',
+      outTimeStr,
+      shiftEndStr,
+      rec.last_out && rec.early_exit_minutes ? formatMinutesToHM(rec.early_exit_minutes) : '0m',
+      rec.early_permission_minutes ? formatMinutesToHM(rec.early_permission_minutes) : '0m',
+      rec.fine_status || (!rec.first_in && !rec.last_out ? 'NONE' : (rec.late_minutes > 0 || rec.early_exit_minutes > 0) ? 'PENDING' : 'NONE'),
       fineAmt,
       rec.review_status || '',
-      rec.review_reason || '',
+      rec.review_reason || rec.fine_reason || '',
     ];
 
     rowValues.forEach((val, cIdx) => {
@@ -1724,29 +1990,68 @@ export const exportDailyLateFinesExcel = async (records = [], targetDate, meta =
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
       }
       cell.alignment = {
-        horizontal: cIdx === 0 || cIdx === 1 || cIdx === 3 || cIdx === 4 || cIdx === 5 || cIdx === 6 || cIdx === 9 || cIdx === 11 ? 'center' : cIdx === 7 || cIdx === 8 || cIdx === 10 ? 'right' : 'left',
+        horizontal: cIdx === 0 || cIdx === 1 || cIdx === 3 || cIdx === 4 || cIdx === 5 || cIdx === 7 || cIdx === 8 || cIdx === 9 || cIdx === 11 || cIdx === 12 || cIdx === 14 ? 'center' : cIdx === 6 || cIdx === 10 || cIdx === 13 ? 'right' : 'left',
         vertical: 'middle',
       };
       cell.border = thinCellBorder;
+
+      // Late duration highlight
+      if (cIdx === 6 && rec.late_minutes > 0) {
+        if (fineAmt > 0 || rec.fine_status === 'CONFIRMED') {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } };
+          cell.font = { name: 'Arial', size: 9, bold: true, color: { argb: 'FFB91C1C' } };
+        } else if (isWaived) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+          cell.font = { name: 'Arial', size: 9, color: { argb: 'FF475569' } };
+        } else {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFEDD5' } };
+          cell.font = { name: 'Arial', size: 9, bold: true, color: { argb: 'FF9A3412' } };
+        }
+      }
+
+      // Early exit highlight
+      if (cIdx === 10 && rec.early_exit_minutes > 0) {
+        if (fineAmt > 0 || rec.fine_status === 'CONFIRMED') {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } };
+          cell.font = { name: 'Arial', size: 9, bold: true, color: { argb: 'FF991B1B' } };
+        } else if (isWaived) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+          cell.font = { name: 'Arial', size: 9, color: { argb: 'FF475569' } };
+        } else {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE4E6' } };
+          cell.font = { name: 'Arial', size: 9, bold: true, color: { argb: 'FF9F1239' } };
+        }
+      }
+
+      // Fine amount highlight
+      if (cIdx === 13) {
+        if (fineAmt > 0 || rec.fine_status === 'CONFIRMED') {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } };
+          cell.font = { name: 'Arial', size: 9.5, bold: true, color: { argb: 'FFDC2626' } };
+        } else if (isWaived) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFECFDF5' } };
+          cell.font = { name: 'Arial', size: 9, bold: true, color: { argb: 'FF047857' } };
+        }
+      }
     });
 
     currRow++;
   });
 
   // Summary Row
-  worksheet.mergeCells(`A${currRow}:M${currRow}`);
+  worksheet.mergeCells(`A${currRow}:P${currRow}`);
   const summaryCell = worksheet.getCell(`A${currRow}`);
-  summaryCell.value = `Total Workforce = ${records.length}  |  Total Late Staff = ${lateCount}  |  Total Confirmed Penalties = INR ${totalFineAmt.toLocaleString()}`;
+  summaryCell.value = `Total Workforce = ${records.length}  |  Late Staff = ${lateCount}  |  Early Exit Staff = ${earlyCount}  |  Total Confirmed Penalties = INR ${totalFineAmt.toLocaleString()}`;
   summaryCell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF0F172A' } };
   summaryCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
   summaryCell.alignment = { horizontal: 'left', vertical: 'middle' };
   worksheet.getRow(currRow).height = 22;
 
-  for (let c = 1; c <= 13; c++) {
+  for (let c = 1; c <= 16; c++) {
     worksheet.getRow(currRow).getCell(c).border = darkBorder;
   }
 
-  await saveWorkbook(workbook, `SCOTO_Daily_Late_Fines_${targetDate}`);
+  await saveWorkbook(workbook, `SCOTO_Daily_Late_Early_Fines_${targetDate}`);
 };
 
 /**
@@ -1954,24 +2259,16 @@ export const exportMonthlyLateFinesExcel = async (records = [], month, year, met
   let grandTotalFine = 0;
   let grandTotalPermMins = 0;
 
-  // Format permission minutes exactly like user requested: per(30min), 1hrs ( per)
+  // Format permission minutes: per(30m), per(1h 0m), per(1h 10m)
   const formatPermissionStr = (mins) => {
     if (!mins || mins <= 0) return '';
-    if (mins === 30) return 'per(30min)';
-    if (mins === 60) return '1hrs ( per)';
-    if (mins % 60 === 0) return `${mins / 60}hrs ( per)`;
-    if (mins < 60) return `per(${mins}min)`;
-    return `${Math.floor(mins / 60)}h ${mins % 60}m (per)`;
+    return `per(${formatMinutesToHM(mins)})`;
   };
 
   // Format total permission summary
   const formatTotalPermSummary = (mins) => {
-    if (!mins || mins <= 0) return '0';
-    if (mins === 30) return '30min';
-    if (mins === 60) return '1 hr';
-    if (mins % 60 === 0) return `${mins / 60} hrs`;
-    if (mins < 60) return `${mins}min`;
-    return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+    if (!mins || mins <= 0) return '0m';
+    return formatMinutesToHM(mins);
   };
 
   // Populate Employee Rows
@@ -2019,7 +2316,7 @@ export const exportMonthlyLateFinesExcel = async (records = [], month, year, met
         cellFont = { name: 'Arial', size: 9, color: { argb: 'FF94A3B8' } };
       } else if (rec) {
         const fineAmt = rec.fine_amount ? Number(rec.fine_amount) : 0;
-        const permMins = Number(rec.permission_minutes_applied) || 0;
+        const permMins = (Number(rec.permission_minutes_applied) || 0) + (Number(rec.early_permission_minutes) || 0);
         const isConfirmed = rec.fine_status === 'CONFIRMED';
         const isWaived = rec.fine_status === 'WAIVED';
 
@@ -2030,7 +2327,7 @@ export const exportMonthlyLateFinesExcel = async (records = [], month, year, met
         if (isConfirmed && fineAmt > 0) {
           empTotalFineAmt += fineAmt;
           if (permMins > 0) {
-            cellVal = `${fineAmt} (per ${permMins}m)`;
+            cellVal = `${fineAmt} (per ${formatMinutesToHM(permMins)})`;
           } else {
             cellVal = fineAmt; // e.g. 100
           }

@@ -42,6 +42,16 @@ const STATUS_CONFIGS = {
     bg: 'bg-blue-50 text-blue-800 border-blue-300',
     dot: 'bg-blue-600',
   },
+  WFH: {
+    label: 'WFH',
+    bg: 'bg-cyan-50 text-cyan-800 border-cyan-300 ring-1 ring-cyan-400',
+    dot: 'bg-cyan-600',
+  },
+  WORK_FROM_HOME: {
+    label: 'WFH',
+    bg: 'bg-cyan-50 text-cyan-800 border-cyan-300 ring-1 ring-cyan-400',
+    dot: 'bg-cyan-600',
+  },
   DEVICE_ISSUE: {
     label: 'Device Issue',
     bg: 'bg-purple-50 text-purple-800 border-purple-300',

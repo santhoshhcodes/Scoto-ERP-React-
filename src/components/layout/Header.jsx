@@ -180,7 +180,6 @@ export const Header = ({ onToggleSidebar, onMenuClick, isSidebarOpen }) => {
           <button
             onClick={() => {
               setShowProfileMenu(!showProfileMenu);
-              setShowNotification(false);
             }}
             className="flex items-center gap-2 rounded-lg p-1.5 hover:bg-slate-100 transition-colors cursor-pointer"
           >

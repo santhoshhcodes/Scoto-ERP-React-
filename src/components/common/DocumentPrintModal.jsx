@@ -409,6 +409,15 @@ export const DocumentPrintModal = ({
                 </span>
               </div>
 
+              {documentType === 'QUOTATION' && (documentData.RevLabel || documentData.RevNo !== undefined) && (
+                <div>
+                  <span className="text-[9px] font-bold uppercase text-slate-500 block">Revision:</span>
+                  <span className="font-mono font-bold text-xs text-indigo-700 block">
+                    {documentData.RevLabel || (documentData.RevNo ? `${documentData.RevNo}R` : 'ORIGINAL')}
+                  </span>
+                </div>
+              )}
+
               {quotationNo && (
                 <div>
                   <span className="text-[9px] font-bold uppercase text-slate-500 block">Quotation Ref:</span>

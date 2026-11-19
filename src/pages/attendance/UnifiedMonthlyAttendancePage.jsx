@@ -28,6 +28,7 @@ import {
   exportETimeTrackLiteOverallReport,
   exportETimeTrackLiteIndividualReport,
   parseDayDetails,
+  formatMinutesToHM,
 } from '../../utils/excelUtils';
 import {
   useMonthlyReport,
@@ -177,6 +178,8 @@ export const UnifiedMonthlyAttendancePage = () => {
       let overLeaveDays = 0;
       let lateDays = 0;
       let totalLateMins = 0;
+      let earlyExitDays = 0;
+      let totalEarlyExitMins = 0;
       let confirmedFinesCount = 0;
       let totalFineAmount = 0;
       let permDays = 0;
@@ -185,11 +188,15 @@ export const UnifiedMonthlyAttendancePage = () => {
       let onSiteCount = 0;
 
       (emp.days || []).forEach((day) => {
-        const parsed = parseDayDetails(day);
+        const parsed = parseDayDetails(day, emp);
         if (parsed.isOverLeave) overLeaveDays++;
         if (parsed.lateMins > 0) {
           lateDays++;
           totalLateMins += parsed.lateMins;
+        }
+        if (parsed.earlyExitMins > 0) {
+          earlyExitDays++;
+          totalEarlyExitMins += parsed.earlyExitMins;
         }
         if (parsed.fineAmt > 0 || parsed.isFineConfirmed) {
           confirmedFinesCount++;
@@ -208,6 +215,8 @@ export const UnifiedMonthlyAttendancePage = () => {
         overLeaveDays,
         lateDays,
         totalLateMins,
+        earlyExitDays,
+        totalEarlyExitMins,
         confirmedFinesCount,
         totalFineAmount,
         permDays,
@@ -440,12 +449,12 @@ export const UnifiedMonthlyAttendancePage = () => {
             {isRepeatedLate ? (
               <span className="inline-flex items-center gap-1.5 rounded-md bg-rose-100 text-rose-800 border border-rose-300 px-2 py-0.5 font-extrabold text-[11px] shadow-2xs">
                 <AlertTriangle className="h-3.5 w-3.5 text-rose-600 shrink-0" />
-                <span>{row.lateDays} Repeated Late ({row.totalLateMins}m)</span>
+                <span>{row.lateDays} Repeated Late ({formatMinutesToHM(row.totalLateMins)})</span>
               </span>
             ) : hasLate ? (
               <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 text-amber-800 border border-amber-200 px-1.5 py-0.5 font-semibold text-[11px]">
                 <Clock className="h-3 w-3 text-amber-600 shrink-0" />
-                <span>{row.lateDays} Late ({row.totalLateMins}m)</span>
+                <span>{row.lateDays} Late ({formatMinutesToHM(row.totalLateMins)})</span>
               </span>
             ) : null}
 
@@ -981,10 +990,16 @@ export const UnifiedMonthlyAttendancePage = () => {
               <div>
                 <span className="text-slate-400 block text-[10px]">Late Days</span>
                 <span className={`font-bold text-sm ${selectedEmployee.lateDays >= 3 ? 'text-rose-700' : 'text-slate-800'}`}>
-                  {selectedEmployee.lateDays || 0} ({selectedEmployee.totalLateMins || 0}m)
+                  {selectedEmployee.lateDays || 0} ({formatMinutesToHM(selectedEmployee.totalLateMins)})
                   {selectedEmployee.lateDays >= 3 && (
                     <span className="block text-[10px] text-rose-600 font-extrabold">⚠️ Repeated Late</span>
                   )}
+                </span>
+              </div>
+              <div>
+                <span className="text-slate-400 block text-[10px]">Early Exits</span>
+                <span className={`font-bold text-sm ${selectedEmployee.earlyExitDays > 0 ? 'text-amber-700' : 'text-slate-700'}`}>
+                  {selectedEmployee.earlyExitDays || 0} ({formatMinutesToHM(selectedEmployee.totalEarlyExitMins || 0)})
                 </span>
               </div>
               <div>
@@ -1014,13 +1029,14 @@ export const UnifiedMonthlyAttendancePage = () => {
                     <th className="px-2.5 py-2.5 border-r border-slate-200 text-center">Leave / LOP</th>
                     <th className="px-2 py-2.5 border-r border-slate-200 text-center">Perm (Hr)</th>
                     <th className="px-2.5 py-2.5 border-r border-slate-200 text-center">Late</th>
+                    <th className="px-2.5 py-2.5 border-r border-slate-200 text-center">Early Exit</th>
                     <th className="px-2.5 py-2.5 border-r border-slate-200 text-center">Fine</th>
                     <th className="px-3 py-2.5">Remarks</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-mono text-[11px]">
                   {selectedEmployee.days?.map((day, dIdx) => {
-                    const parsed = parseDayDetails(day);
+                    const parsed = parseDayDetails(day, selectedEmployee);
                     const isSunday = day.status === 'WeeklyOff';
                     const isAbsent = day.status === 'Absent' || parsed.isAbsent;
                     const dayDate = day.date || day.date_str || day.iso_date || '';
@@ -1126,6 +1142,22 @@ export const UnifiedMonthlyAttendancePage = () => {
                                 }`}
                             >
                               {parsed.lateDisplay}
+                            </span>
+                          ) : (
+                            <span className="text-slate-300">--</span>
+                          )}
+                        </td>
+
+                        {/* Early Exit Column */}
+                        <td className="px-2.5 py-2 border-r border-slate-100 font-sans text-center whitespace-nowrap">
+                          {parsed.earlyExitMins > 0 ? (
+                            <span
+                              className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold ${parsed.fineAmt > 0 || parsed.isFineConfirmed
+                                ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                                : 'bg-slate-100 text-slate-700 border border-slate-200'
+                                }`}
+                            >
+                              {parsed.earlyExitDisplay}
                             </span>
                           ) : (
                             <span className="text-slate-300">--</span>

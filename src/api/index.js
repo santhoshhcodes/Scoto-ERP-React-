@@ -6,5 +6,7 @@ export * from './masterApi';
 export * from './transactionApi';
 export * from './employeeApi';
 export * from './tallyApi';
+export * from './customerReportApi';
+export * from './receiptApi';
 export * from './expenseApi';
 export * from './travelexpenseApi';

@@ -1,5 +1,11 @@
-import React, { createContext, useContext, useState, useMemo, useEffect } from 'react';
+import React, { createContext, useContext, useState, useMemo } from 'react';
 import { useReportFinancialYears } from '../api/customerReportApi';
+import {
+  normalizeFinYear,
+  getFullFinYear,
+  getFinYearCode,
+  generateNextTransactionNo,
+} from '../utils/transactionNumberUtils';
 
 /**
  * Calculates current Financial Year based on system date.
@@ -15,6 +21,13 @@ export const getSystemCurrentFinYear = () => {
   return `${startYear}-${endYear}`;
 };
 
+export {
+  normalizeFinYear,
+  getFullFinYear,
+  getFinYearCode,
+  generateNextTransactionNo,
+};
+
 const FinancialYearContext = createContext(null);
 
 export const FinancialYearProvider = ({ children }) => {
@@ -23,22 +36,27 @@ export const FinancialYearProvider = ({ children }) => {
   const currentSystemFY = useMemo(() => getSystemCurrentFinYear(), []);
 
   const availableYears = useMemo(() => {
-    const fetched = finYearsRes?.data?.data || finYearsRes?.data || [];
-    const base = ['ALL', currentSystemFY, '2025_2026', '2024_2025'];
+    const rawFetched = finYearsRes?.data?.data || finYearsRes?.data || [];
+    const normalizedFetched = Array.isArray(rawFetched)
+      ? rawFetched.map((y) => (y === 'ALL' ? 'ALL' : normalizeFinYear(y)))
+      : [];
+    const base = ['ALL', currentSystemFY, '2025-2026', '2024-2025'];
     // Deduplicate while preserving order
-    return Array.from(new Set([...base, ...fetched]));
+    return Array.from(new Set([...base, ...normalizedFetched]));
   }, [finYearsRes, currentSystemFY]);
 
   const [selectedFinYear, setSelectedFinYearState] = useState(() => {
     try {
       const saved = localStorage.getItem('scoto_selected_fin_year');
-      if (saved && saved !== 'ALL') return saved;
+      if (saved) {
+        return normalizeFinYear(saved);
+      }
 
       const loginFy = localStorage.getItem('scoto_fin_year');
       if (loginFy) {
         const parsed = JSON.parse(loginFy);
         const fyName = parsed?.name || parsed?.id;
-        if (fyName && fyName !== 'ALL') return fyName;
+        if (fyName) return normalizeFinYear(fyName);
       }
     } catch {
       // ignore parse errors
@@ -48,9 +66,10 @@ export const FinancialYearProvider = ({ children }) => {
   });
 
   const setSelectedFinYear = (year) => {
-    setSelectedFinYearState(year);
+    const normalized = normalizeFinYear(year);
+    setSelectedFinYearState(normalized);
     try {
-      localStorage.setItem('scoto_selected_fin_year', year);
+      localStorage.setItem('scoto_selected_fin_year', normalized);
     } catch {
       // ignore
     }
@@ -77,12 +96,13 @@ export const FinancialYearProvider = ({ children }) => {
 export const useFinancialYear = () => {
   const context = useContext(FinancialYearContext);
   if (!context) {
+    const currentFY = getSystemCurrentFinYear();
     return {
-      selectedFinYear: getSystemCurrentFinYear(),
+      selectedFinYear: currentFY,
       setSelectedFinYear: () => {},
-      availableYears: ['ALL', getSystemCurrentFinYear(), '2025_2026', '2024_2025'],
+      availableYears: ['ALL', currentFY, '2025-2026', '2024-2025'],
       isLoadingYears: false,
-      currentSystemFY: getSystemCurrentFinYear(),
+      currentSystemFY: currentFY,
     };
   }
   return context;

@@ -5,10 +5,10 @@
  */
 
 export const API_BASE_URL =
-  import.meta.env.VITE_API_URL || 'http://192.168.1.11:2015/api/v1';
+  import.meta.env.VITE_API_URL || 'http://192.168.1.2:2015/api/v1';
 
 export const BASE_IP_URL =
-  import.meta.env.BASE_IP_URL || 'http://192.168.1.11:2015';
+  import.meta.env.BASE_IP_URL || 'http://192.168.1.2:2015';
 
 export const API_ENDPOINTS = {
   HEALTH: '/health',
@@ -25,6 +25,7 @@ export const API_ENDPOINTS = {
     DOWNLOAD_LOGS: '/attendance/download-logs',
     HOLIDAYS: '/attendance/holidays',
     HOLIDAY_BY_ID: (id) => `/attendance/holidays/${id}`,
+    EMPLOYEE_SHIFT_TIMING: '/attendance/employee-shift-timing',
   },
 
   ATTENDANCE_ADJUSTMENTS: {
@@ -50,6 +51,8 @@ export const API_ENDPOINTS = {
   TRANSACTION: {
     QUOTATIONS: '/transaction/quotations',
     QUOTATION_BY_NO: (transNo) => `/transaction/quotations/${encodeURIComponent(transNo)}`,
+    QUOTATION_REVISE: (transNo) => `/transaction/quotations/${encodeURIComponent(transNo)}/revise`,
+    QUOTATION_REVISIONS: (transNo) => `/transaction/quotations/${encodeURIComponent(transNo)}/revisions`,
     QUOTATION_EXPORT_EXCEL: (transNo) => `/transaction/quotations/${encodeURIComponent(transNo)}/export-excel`,
 
     PROFORMA_INVOICES: '/transaction/proforma-invoices',
@@ -63,9 +66,17 @@ export const API_ENDPOINTS = {
     SALES_INVOICE_EXPORT_EXCEL: (transNo) => `/transaction/sales-invoices/${encodeURIComponent(transNo)}/export-excel`,
     SALES_INVOICE_APPROVAL: (transNo) => `/transaction/sales-invoices/${encodeURIComponent(transNo)}/approval`,
     SALES_INVOICE_PROFORMA_LIST: '/transaction/sales-invoices/meta/proforma-invoices',
+    SALES_INVOICE_BULK_UPLOAD_PREVIEW: '/transaction/sales-invoices/bulk-upload-preview',
+    SALES_INVOICE_BULK_UPLOAD_COMMIT: '/transaction/sales-invoices/bulk-upload-commit',
     CUSTOMER_REPORT_CLIENTS: '/transaction/customer-report/clients',
     CUSTOMER_REPORT_FINANCIAL_YEARS: '/transaction/customer-report/financial-years',
     CUSTOMER_REPORT_DOSSIER: (clientCode) => `/transaction/customer-report/dossier/${encodeURIComponent(clientCode)}`,
+    CUSTOMER_REPORT_EXPORT_EXCEL: (clientCode) => `/transaction/customer-report/export-excel/${encodeURIComponent(clientCode)}`,
+
+    RECEIPTS: '/transaction/receipts',
+    RECEIPT_DEPOSIT_ACCOUNTS: '/transaction/receipts/deposit-accounts',
+    RECEIPT_OPEN_DOCUMENTS: (clientCode) => `/transaction/receipts/open-documents/${encodeURIComponent(clientCode)}`,
+    RECEIPT_BY_NO: (transNo) => `/transaction/receipts/${encodeURIComponent(transNo)}`,
   },
 
   EMPLOYEE: {

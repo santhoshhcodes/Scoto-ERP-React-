@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import { apiClient } from './client';
 import { API_ENDPOINTS } from './endpoints';
 
@@ -37,6 +37,35 @@ export const customerReportApi = {
       params: { fin_year: finYear || 'ALL' },
     });
   },
+
+  /**
+   * Download Executive Customer Report & Ledger Dossier Excel (.xlsx) from backend
+   * GET /api/v1/transaction/customer-report/export-excel/:clientCode?fin_year=...
+   */
+  downloadCustomerReportExcel: async (clientCode, finYear = 'ALL', tab = 'ALL') => {
+    if (!clientCode) return;
+    const url = API_ENDPOINTS.TRANSACTION.CUSTOMER_REPORT_EXPORT_EXCEL(clientCode);
+    const response = await apiClient.get(url, {
+      params: { fin_year: finYear || 'ALL', tab },
+      responseType: 'blob',
+    });
+    const blob =
+      response instanceof Blob
+        ? response
+        : new Blob([response], {
+            type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          });
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    const safeCode = String(clientCode).replace(/[\/\\]/g, '_').trim();
+    const safeFy = String(finYear || 'ALL').replace(/[\/\\]/g, '_').trim();
+    link.setAttribute('download', `Customer_Dossier_${safeCode}_${safeFy}.xlsx`);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(downloadUrl);
+  },
 };
 
 /**
@@ -70,6 +99,16 @@ export const useCustomerDossier = (clientCode, finYear = 'ALL') => {
     queryFn: () => customerReportApi.getDossier(clientCode, finYear),
     enabled: Boolean(clientCode),
     staleTime: 1000 * 60 * 2, // 2 mins
+  });
+};
+
+/**
+ * React Mutation Hook: Download Executive Customer Dossier Excel (.xlsx) from Backend
+ */
+export const useDownloadCustomerReportExcel = () => {
+  return useMutation({
+    mutationFn: ({ clientCode, finYear = 'ALL', tab = 'ALL' }) =>
+      customerReportApi.downloadCustomerReportExcel(clientCode, finYear, tab),
   });
 };
 

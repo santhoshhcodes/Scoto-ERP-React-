@@ -101,7 +101,7 @@ export const AdminLayout = () => {
 
         {/* 2B. MAIN CONTENT AREA (independent scroll for tables & dashboard) */}
         <main className="flex-1 h-full overflow-y-auto overflow-x-hidden bg-slate-50/50 p-4 sm:p-6 lg:p-8">
-          <div className="mx-auto max-w-7xl space-y-6">
+          <div className="w-full max-w-[1600px] mx-auto space-y-6">
             <LayoutErrorBoundary title="Page Error">
               <Outlet />
             </LayoutErrorBoundary>

@@ -18,6 +18,8 @@ import {
   X,
   UserCheck,
   FileText,
+  Building2,
+  MapPin,
 } from 'lucide-react';
 import {
   StatCard,
@@ -35,6 +37,7 @@ import {
   exportETimeTrackLiteIndividualReport,
   exportETimeTrackLiteOverallReport,
   parseDayDetails,
+  formatMinutesToHM,
 } from '../../utils/excelUtils';
 
 export const AttendancePage = () => {
@@ -324,7 +327,7 @@ export const AttendancePage = () => {
               {hrs > 0 || remMins > 0 ? `${hrs}h ${remMins}m` : '--'}
             </span>
             <span className="text-[10px] text-slate-400 block font-normal">
-              ({mins} mins)
+              ({formatMinutesToHM(mins)})
             </span>
           </div>
         );
@@ -337,12 +340,12 @@ export const AttendancePage = () => {
         <div className="text-xs font-mono">
           {row.permission_minutes > 0 && (
             <div className="text-purple-600 font-semibold text-[10px] mb-0.5">
-              Perm: +{row.permission_minutes}m
+              Perm: +{formatMinutesToHM(row.permission_minutes)}
             </div>
           )}
           {row.late_minutes > 0 ? (
             <span className="inline-flex items-center gap-0.5 rounded bg-rose-50 px-1.5 py-0.2 text-[10px] font-semibold text-rose-700 border border-rose-200">
-              Late: {row.late_minutes}m
+              Late: {formatMinutesToHM(row.late_minutes)}
             </span>
           ) : row.first_in ? (
             <span className="text-emerald-600 font-medium text-[11px]">
@@ -364,7 +367,7 @@ export const AttendancePage = () => {
           {row.permission_minutes > 0 && (
             <span className="inline-flex items-center gap-1 rounded bg-purple-50 px-2 py-0.5 text-[10px] font-semibold text-purple-700 border border-purple-200">
               <Clock className="h-3 w-3 text-purple-600" />
-              Perm: +{row.permission_minutes}m
+              Perm: +{formatMinutesToHM(row.permission_minutes)}
             </span>
           )}
           {row.fine_status === 'WAIVED' ? (
@@ -396,6 +399,20 @@ export const AttendancePage = () => {
           {row.review_status && (
             <div className="text-[10px] text-slate-500 mt-0.5 font-medium">
               Confirmed: {row.review_status}
+            </div>
+          )}
+          {row.client_name && (
+            <div
+              className="mt-1 inline-flex items-center gap-1 rounded bg-sky-50 px-1.5 py-0.5 text-[10px] font-semibold text-sky-800 border border-sky-200"
+              title={`${row.client_name}${row.place_of_visit ? ` • ${row.place_of_visit}` : ''}`}
+            >
+              <Building2 className="h-2.5 w-2.5 text-sky-600 shrink-0" />
+              <span className="truncate max-w-[130px]">{row.client_name}</span>
+              {row.place_of_visit && (
+                <span className="text-sky-600 font-normal truncate max-w-[80px]">
+                  • {row.place_of_visit}
+                </span>
+              )}
             </div>
           )}
         </div>
@@ -552,9 +569,9 @@ export const AttendancePage = () => {
               : 'Not Checked Out',
           'Total Punches': row.total_punches || 0,
           'Work Duration': workDuration,
-          'Total Working Minutes': mins,
-          'Late Delay (Mins)': row.late_minutes || 0,
-          'Permission (Mins)': row.permission_minutes || 0,
+          'Total Working Duration': formatMinutesToHM(mins),
+          'Late Delay': row.late_minutes ? formatMinutesToHM(row.late_minutes) : '0m',
+          'Permission Duration': row.permission_minutes ? formatMinutesToHM(row.permission_minutes) : '0m',
           'Attendance Status': row.status,
           'Fine Status': row.fine_status || 'NONE',
           'Fine Amount (INR)': row.fine_amount || 0,
