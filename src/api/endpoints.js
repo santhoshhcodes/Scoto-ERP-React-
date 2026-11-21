@@ -42,10 +42,11 @@ export const API_ENDPOINTS = {
 
   MASTER: {
     ITEMS: '/master/items',
-    ITEM_BY_CODE: (itemCode) => `/master/items/${itemCode}`,
+    ITEM_BY_CODE: (itemCode) => `/master/items/${encodeURIComponent(itemCode)}`,
     LEDGERS: '/master/ledgers',
     LEDGER_BY_CODE: (ledgerCode) => `/master/ledgers/${encodeURIComponent(ledgerCode)}`,
     LEDGER_HEADERS: '/master/ledgers/headers',
+    NEXT_LEDGER_CODE: '/master/ledgers/next-code',
   },
 
   TRANSACTION: {
@@ -70,6 +71,7 @@ export const API_ENDPOINTS = {
     SALES_INVOICE_BULK_UPLOAD_COMMIT: '/transaction/sales-invoices/bulk-upload-commit',
     CUSTOMER_REPORT_CLIENTS: '/transaction/customer-report/clients',
     CUSTOMER_REPORT_FINANCIAL_YEARS: '/transaction/customer-report/financial-years',
+    CUSTOMER_REPORT_PORTFOLIO_SUMMARY: '/transaction/customer-report/portfolio-summary',
     CUSTOMER_REPORT_DOSSIER: (clientCode) => `/transaction/customer-report/dossier/${encodeURIComponent(clientCode)}`,
     CUSTOMER_REPORT_EXPORT_EXCEL: (clientCode) => `/transaction/customer-report/export-excel/${encodeURIComponent(clientCode)}`,
 

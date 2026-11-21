@@ -27,6 +27,16 @@ export const customerReportApi = {
   },
 
   /**
+   * Fetch portfolio-level summary and industry-wide receivables
+   * GET /api/v1/transaction/customer-report/portfolio-summary?fin_year=...
+   */
+  getPortfolioSummary: async (finYear = 'ALL') => {
+    return await apiClient.get(API_ENDPOINTS.TRANSACTION.CUSTOMER_REPORT_PORTFOLIO_SUMMARY, {
+      params: { fin_year: finYear || 'ALL' },
+    });
+  },
+
+  /**
    * Fetch complete 360 financial dossier for a customer
    * GET /api/v1/transaction/customer-report/dossier/:clientCode?fin_year=...
    */
@@ -87,6 +97,17 @@ export const useReportFinancialYears = () => {
     queryKey: ['customer-report', 'financial-years'],
     queryFn: () => customerReportApi.getFinancialYears(),
     staleTime: 1000 * 60 * 30, // 30 mins
+  });
+};
+
+/**
+ * React Query Hook: Customer Portfolio Overview & Industry Analytics
+ */
+export const useCustomerPortfolioSummary = (finYear = 'ALL') => {
+  return useQuery({
+    queryKey: ['customer-report', 'portfolio-summary', finYear],
+    queryFn: () => customerReportApi.getPortfolioSummary(finYear),
+    staleTime: 1000 * 60 * 2, // 2 mins
   });
 };
 

@@ -643,7 +643,7 @@ export const BulkInvoiceUploadPage = () => {
                           {(previewData.invoices || []).map((inv) => {
                             const isSelected = selectedInvoiceNos.has(inv.invoice_no);
                             const isDuplicate = Boolean(inv.is_duplicate);
-                            const custLookup = inv.gst_no || (inv.customer_name || '').toLowerCase();
+                            const custLookup = inv.lookup_key || inv.gst_no || (inv.customer_name || '').toLowerCase();
                             const custOverride = ledgerOverrides[custLookup] || (previewData.ledgers || []).find((l) => l.lookup_key === custLookup);
                             const displayCustName = custOverride?.customer_name || inv.customer_name;
                             const linkedCustCode = (!custOverride?.is_create_new && (custOverride?.selected_ledger_code || custOverride?.matched_ledger_code))
@@ -673,16 +673,33 @@ export const BulkInvoiceUploadPage = () => {
                                   />
                                 </td>
                                 <td className="p-3 font-bold font-mono text-slate-900">
-                                  {inv.invoice_no}
+                                  <div>{inv.invoice_no}</div>
+                                  {inv.source_file && (
+                                    <div className="text-[10px] text-slate-400 font-mono font-normal truncate max-w-[170px]" title={inv.source_file}>
+                                      {inv.source_file}
+                                    </div>
+                                  )}
                                 </td>
                                 <td className="p-3 text-slate-600">{inv.invoice_date}</td>
                                 <td className="p-3">
-                                  <div className="font-semibold text-slate-900">{displayCustName}</div>
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="font-semibold text-slate-900">{displayCustName}</span>
+                                    {inv.detected_unit && (
+                                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                        Unit: {inv.detected_unit}
+                                      </span>
+                                    )}
+                                  </div>
                                   <div className="text-[10px] text-slate-500 font-mono mt-0.5 flex items-center gap-1.5">
                                     <span>Ledger:</span>
                                     <span className="font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200">
                                       {linkedCustCode}
                                     </span>
+                                    {inv.detected_unit && inv.base_customer_name && (
+                                      <span className="text-slate-400 font-normal">
+                                        (Parent: {inv.base_customer_name})
+                                      </span>
+                                    )}
                                   </div>
                                 </td>
                                 <td className="p-3 font-mono text-[11px] text-slate-500">
@@ -836,7 +853,14 @@ export const BulkInvoiceUploadPage = () => {
                             return (
                               <tr key={ldg.lookup_key} className="hover:bg-slate-50/70 transition-colors">
                                 <td className="p-3">
-                                  <div className="font-semibold text-slate-900">{rawName}</div>
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="font-semibold text-slate-900">{rawName}</span>
+                                    {ldg.detected_unit && (
+                                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-indigo-100 text-indigo-800 border border-indigo-300">
+                                        Unit: {ldg.detected_unit}
+                                      </span>
+                                    )}
+                                  </div>
                                   {hasRemovedPrefix && (
                                     <span className="inline-block mt-0.5 text-[10px] text-amber-700 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200">
                                       'M/s.' prefix removed
@@ -853,6 +877,11 @@ export const BulkInvoiceUploadPage = () => {
                                     placeholder="Enter Customer Name"
                                     className="px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg font-medium text-slate-800 w-full focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 bg-white"
                                   />
+                                  {ldg.detected_unit && ldg.base_customer_name && (
+                                    <span className="block mt-0.5 text-[10px] text-slate-500 font-medium">
+                                      Cheque Print / Legal: <strong>{ldg.base_customer_name}</strong>
+                                    </span>
+                                  )}
                                 </td>
                                 <td className="p-3 font-mono text-[11px] text-slate-600">
                                   {override.gst_no || override.excel_gst || '-'}
@@ -861,7 +890,17 @@ export const BulkInvoiceUploadPage = () => {
                                   {override.state || '-'} {override.city ? `(${override.city})` : ''}
                                 </td>
                                 <td className="p-3 text-center">
-                                  {isExisting ? (
+                                  {ldg.match_type === 'EXACT_UNIT_MATCH' ? (
+                                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                      <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                      Matched Unit Ledger
+                                    </span>
+                                  ) : ldg.match_type === 'NEW_UNIT_LEDGER' ? (
+                                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-purple-100 text-purple-800 border border-purple-300" title={`Parent customer ${ldg.parent_ledger_name} exists`}>
+                                      <Plus className="w-3 h-3 text-purple-600" />
+                                      New Unit ({ldg.parent_ledger_code})
+                                    </span>
+                                  ) : isExisting ? (
                                     <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
                                       <CheckCircle2 className="w-3 h-3 text-emerald-600" />
                                       Matched Existing
@@ -877,6 +916,8 @@ export const BulkInvoiceUploadPage = () => {
                                   <span className={`inline-block font-mono font-bold text-xs px-2.5 py-1 rounded-lg border ${
                                     isExisting
                                       ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                      : ldg.match_type === 'NEW_UNIT_LEDGER'
+                                      ? 'bg-purple-50 text-purple-800 border-purple-200'
                                       : 'bg-blue-50 text-blue-800 border-blue-200'
                                   }`}>
                                     {targetCode}
@@ -896,7 +937,16 @@ export const BulkInvoiceUploadPage = () => {
                                     }}
                                     className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg bg-white font-medium text-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 cursor-pointer"
                                   >
-                                    <option value="">-- Create As New Customer ({targetCode}) --</option>
+                                    <option value="">
+                                      {ldg.match_type === 'NEW_UNIT_LEDGER'
+                                        ? `-- Create As Separate Unit Ledger (${targetCode}) --`
+                                        : `-- Create As New Customer (${targetCode}) --`}
+                                    </option>
+                                    {ldg.parent_ledger_code && (
+                                      <option value={ldg.parent_ledger_code} className="font-bold text-purple-800">
+                                        -- Merge into Parent: {ldg.parent_ledger_name || ldg.parent_ledger_code} ({ldg.parent_ledger_code}) --
+                                      </option>
+                                    )}
                                     {(dbLedgers || []).map((dbL) => (
                                       <option key={dbL.LedgerCode} value={dbL.LedgerCode}>
                                         {dbL.LedgerName} ({dbL.LedgerCode}) {dbL.City ? `- ${dbL.City}` : ''}

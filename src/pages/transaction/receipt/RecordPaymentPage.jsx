@@ -654,7 +654,14 @@ export const RecordPaymentPage = () => {
                   <Building2 className="w-6 h-6" />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-slate-900">{customerName}</h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-bold text-slate-900">{customerName}</h3>
+                    {(selectedCustomer?.CustomerUnit || dossierData?.customer_info?.CustomerUnit) && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                        {selectedCustomer?.CustomerUnit || dossierData?.customer_info?.CustomerUnit}
+                      </span>
+                    )}
+                  </div>
                   <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 mt-0.5">
                     <span>
                       Ledger Code: <strong className="font-mono text-slate-700">{customerCode}</strong>
@@ -736,12 +743,21 @@ export const RecordPaymentPage = () => {
                         className="w-full text-left px-4 py-2.5 text-xs hover:bg-emerald-50/80 transition-colors flex items-center justify-between group cursor-pointer"
                       >
                         <div>
-                          <span className="font-semibold text-slate-800 group-hover:text-emerald-900">
-                            {client.LedgerName || client.name}
-                          </span>
-                          <span className="ml-2 text-[11px] font-mono text-slate-400">
-                            ({client.LedgerCode || client.code})
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-slate-800 group-hover:text-emerald-900">
+                              {client.LedgerName || client.name}
+                            </span>
+                            {client.CustomerUnit && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                                {client.CustomerUnit}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 mt-0.5 text-[11px] text-slate-400">
+                            <span className="font-mono">({client.LedgerCode || client.code})</span>
+                            {client.City && <span>• {client.City}</span>}
+                            {client.GSTNo && <span>• GST: {client.GSTNo}</span>}
+                          </div>
                         </div>
                         <span className="text-[10px] uppercase font-bold text-slate-400 group-hover:text-emerald-600">
                           Select

@@ -723,13 +723,30 @@ export const BulkInvoiceUploadModal = ({ isOpen, onClose, onSuccess }) => {
                                     />
                                   </td>
                                   <td className="p-3 font-bold text-slate-900 font-mono">
-                                    {inv.invoice_no}
+                                    <div>{inv.invoice_no}</div>
+                                    {inv.source_file && (
+                                      <div className="text-[10px] text-slate-400 font-mono font-normal truncate max-w-[170px]" title={inv.source_file}>
+                                        {inv.source_file}
+                                      </div>
+                                    )}
                                   </td>
                                   <td className="p-3 text-slate-600 font-mono">
                                     {inv.invoice_date}
                                   </td>
                                   <td className="p-3 font-medium text-slate-900">
-                                    {inv.customer_name}
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span>{inv.customer_name}</span>
+                                      {inv.detected_unit && (
+                                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                          {inv.detected_unit}
+                                        </span>
+                                      )}
+                                    </div>
+                                    {inv.detected_unit && inv.base_customer_name && (
+                                      <div className="text-[10px] text-slate-400 font-normal">
+                                        Parent: {inv.base_customer_name}
+                                      </div>
+                                    )}
                                   </td>
                                   <td className="p-3 font-mono text-[11px] text-slate-500">
                                     {inv.gst_no || 'Unregistered'}
@@ -854,10 +871,15 @@ export const BulkInvoiceUploadModal = ({ isOpen, onClose, onSuccess }) => {
                             >
                               <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
                                 <div>
-                                  <div className="flex items-center gap-2">
+                                  <div className="flex items-center gap-2 flex-wrap">
                                     <h4 className="text-sm font-bold text-slate-900">
                                       {l.customer_name || l.excel_customer_name}
                                     </h4>
+                                    {l.detected_unit && (
+                                      <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-indigo-100 text-indigo-800 border border-indigo-300">
+                                        Unit: {l.detected_unit}
+                                      </span>
+                                    )}
                                     {l.excel_customer_name && l.excel_customer_name !== (l.customer_name || '') && (
                                       <span className="text-[10px] text-amber-700 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200">
                                         Prefix 'M/s.' removed
@@ -866,7 +888,11 @@ export const BulkInvoiceUploadModal = ({ isOpen, onClose, onSuccess }) => {
                                     {/* Match Badge */}
                                     <span
                                       className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wide ${
-                                        l.match_type === 'EXACT_GST'
+                                        l.match_type === 'EXACT_UNIT_MATCH'
+                                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                                          : l.match_type === 'NEW_UNIT_LEDGER'
+                                          ? 'bg-purple-100 text-purple-800 border border-purple-300'
+                                          : l.match_type === 'EXACT_GST'
                                           ? 'bg-emerald-100 text-emerald-800'
                                           : l.match_type === 'EXACT_NAME'
                                           ? 'bg-emerald-100 text-emerald-800'
@@ -875,6 +901,9 @@ export const BulkInvoiceUploadModal = ({ isOpen, onClose, onSuccess }) => {
                                           : 'bg-blue-100 text-blue-800'
                                       }`}
                                     >
+                                      {l.match_type === 'EXACT_UNIT_MATCH' && 'Matched Unit Ledger (100%)'}
+                                      {l.match_type === 'NEW_UNIT_LEDGER' &&
+                                        `New Unit of ${l.parent_ledger_name || 'Existing Customer'} (${l.parent_ledger_code})`}
                                       {l.match_type === 'EXACT_GST' && 'Exact GST Match (100%)'}
                                       {l.match_type === 'EXACT_NAME' && 'Exact Name Match (100%)'}
                                       {l.match_type === 'FUZZY_NAME' &&
@@ -882,7 +911,12 @@ export const BulkInvoiceUploadModal = ({ isOpen, onClose, onSuccess }) => {
                                       {l.match_type === 'NEW_LEDGER' && 'New Customer'}
                                     </span>
                                   </div>
-                                  <div className="flex items-center gap-4 text-xs text-slate-500 mt-1 font-mono">
+                                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500 mt-1 font-mono">
+                                    {l.detected_unit && l.base_customer_name && (
+                                      <span className="text-slate-700 font-sans font-medium">
+                                        Cheque Print / Legal: <strong className="text-slate-900">{l.base_customer_name}</strong>
+                                      </span>
+                                    )}
                                     <span>GST: {l.gst_no || l.excel_gst || 'None'}</span>
                                     <span>PAN: {l.pan_no || l.excel_pan || 'None'}</span>
                                     <span>City: {l.city || 'N/A'}</span>
@@ -890,34 +924,67 @@ export const BulkInvoiceUploadModal = ({ isOpen, onClose, onSuccess }) => {
                                 </div>
 
                                 {/* Reconcile Action Toggle */}
-                                <div className="flex items-center gap-3">
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      handleLedgerActionChange(l.lookup_key, false)
-                                    }
-                                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
-                                      !isNew
-                                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
-                                        : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                                    }`}
-                                  >
-                                    Link to Existing Ledger
-                                  </button>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  {l.match_type === 'NEW_UNIT_LEDGER' && l.parent_ledger_code ? (
+                                    <>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          handleLedgerActionChange(l.lookup_key, true)
+                                        }
+                                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
+                                          isNew
+                                            ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
+                                            : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                                        }`}
+                                      >
+                                        Create Separate Unit Ledger ({override.assigned_code || l.assigned_code})
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          handleSelectExistingLedger(l.lookup_key, l.parent_ledger_code)
+                                        }
+                                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
+                                          !isNew && override.selected_ledger_code === l.parent_ledger_code
+                                            ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                                            : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                                        }`}
+                                      >
+                                        Merge into Parent ({l.parent_ledger_code})
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          handleLedgerActionChange(l.lookup_key, false)
+                                        }
+                                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
+                                          !isNew
+                                            ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                                            : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                                        }`}
+                                      >
+                                        Link to Existing Ledger
+                                      </button>
 
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      handleLedgerActionChange(l.lookup_key, true)
-                                    }
-                                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
-                                      isNew
-                                        ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                                        : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                                    }`}
-                                  >
-                                    Create as New Ledger
-                                  </button>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          handleLedgerActionChange(l.lookup_key, true)
+                                        }
+                                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
+                                          isNew
+                                            ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                                            : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                                        }`}
+                                      >
+                                        Create as New Ledger
+                                      </button>
+                                    </>
+                                  )}
                                 </div>
                               </div>
 
@@ -950,72 +1017,113 @@ export const BulkInvoiceUploadModal = ({ isOpen, onClose, onSuccess }) => {
                                     )}
                                   </div>
                                 ) : (
-                                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 text-xs">
-                                    <div className="sm:col-span-2">
-                                      <label className="block text-[10px] font-bold text-slate-500 uppercase">
-                                        Billing Address
-                                      </label>
-                                      <input
-                                        type="text"
-                                        value={override.address1 || ''}
-                                        onChange={(e) =>
-                                          handleUpdateNewLedgerField(
-                                            l.lookup_key,
-                                            'address1',
-                                            e.target.value
-                                          )
-                                        }
-                                        placeholder="Street / Area Address"
-                                        className="w-full mt-0.5 px-2.5 py-1 text-xs rounded border border-slate-300 bg-white"
-                                      />
-                                    </div>
-                                    <div>
-                                      <label className="block text-[10px] font-bold text-slate-500 uppercase">
-                                        City
-                                      </label>
-                                      <input
-                                        type="text"
-                                        value={override.city || ''}
-                                        onChange={(e) =>
-                                          handleUpdateNewLedgerField(
-                                            l.lookup_key,
-                                            'city',
-                                            e.target.value
-                                          )
-                                        }
-                                        className="w-full mt-0.5 px-2.5 py-1 text-xs rounded border border-slate-300 bg-white"
-                                      />
-                                    </div>
-                                    <div>
-                                      <label className="block text-[10px] font-bold text-slate-500 uppercase">
-                                        Pincode / State
-                                      </label>
-                                      <div className="flex gap-1 mt-0.5">
+                                  <div className="space-y-2 text-xs">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                      <div>
+                                        <label className="block text-[10px] font-bold text-slate-500 uppercase">
+                                          Ledger Name (Operational ERP Account)
+                                        </label>
                                         <input
                                           type="text"
-                                          value={override.pincode || ''}
+                                          value={override.customer_name || override.full_customer_name || ''}
                                           onChange={(e) =>
                                             handleUpdateNewLedgerField(
                                               l.lookup_key,
-                                              'pincode',
+                                              'customer_name',
                                               e.target.value
                                             )
                                           }
-                                          placeholder="PIN"
-                                          className="w-16 px-1.5 py-1 text-xs rounded border border-slate-300 bg-white"
+                                          placeholder="e.g. ABC Textiles Ltd - Unit A"
+                                          className="w-full mt-0.5 px-2.5 py-1 text-xs rounded border border-slate-300 bg-white font-medium"
                                         />
+                                      </div>
+                                      <div>
+                                        <label className="block text-[10px] font-bold text-slate-500 uppercase">
+                                          Cheque Print Name (Legal Company Title)
+                                        </label>
                                         <input
                                           type="text"
-                                          value={override.state || 'Tamil Nadu'}
+                                          value={override.base_customer_name || override.customer_name || ''}
                                           onChange={(e) =>
                                             handleUpdateNewLedgerField(
                                               l.lookup_key,
-                                              'state',
+                                              'base_customer_name',
                                               e.target.value
                                             )
                                           }
-                                          className="w-full px-2 py-1 text-xs rounded border border-slate-300 bg-white"
+                                          placeholder="e.g. ABC Textiles Ltd"
+                                          className="w-full mt-0.5 px-2.5 py-1 text-xs rounded border border-slate-300 bg-white"
                                         />
+                                      </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                                      <div className="sm:col-span-2">
+                                        <label className="block text-[10px] font-bold text-slate-500 uppercase">
+                                          Billing Address
+                                        </label>
+                                        <input
+                                          type="text"
+                                          value={override.address1 || ''}
+                                          onChange={(e) =>
+                                            handleUpdateNewLedgerField(
+                                              l.lookup_key,
+                                              'address1',
+                                              e.target.value
+                                            )
+                                          }
+                                          placeholder="Street / Area Address"
+                                          className="w-full mt-0.5 px-2.5 py-1 text-xs rounded border border-slate-300 bg-white"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="block text-[10px] font-bold text-slate-500 uppercase">
+                                          City
+                                        </label>
+                                        <input
+                                          type="text"
+                                          value={override.city || ''}
+                                          onChange={(e) =>
+                                            handleUpdateNewLedgerField(
+                                              l.lookup_key,
+                                              'city',
+                                              e.target.value
+                                            )
+                                          }
+                                          className="w-full mt-0.5 px-2.5 py-1 text-xs rounded border border-slate-300 bg-white"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="block text-[10px] font-bold text-slate-500 uppercase">
+                                          Pincode / State
+                                        </label>
+                                        <div className="flex gap-1 mt-0.5">
+                                          <input
+                                            type="text"
+                                            value={override.pincode || ''}
+                                            onChange={(e) =>
+                                              handleUpdateNewLedgerField(
+                                                l.lookup_key,
+                                                'pincode',
+                                                e.target.value
+                                              )
+                                            }
+                                            placeholder="PIN"
+                                            className="w-16 px-1.5 py-1 text-xs rounded border border-slate-300 bg-white"
+                                          />
+                                          <input
+                                            type="text"
+                                            value={override.state || 'Tamil Nadu'}
+                                            onChange={(e) =>
+                                              handleUpdateNewLedgerField(
+                                                l.lookup_key,
+                                                'state',
+                                                e.target.value
+                                              )
+                                            }
+                                            className="w-full px-2 py-1 text-xs rounded border border-slate-300 bg-white"
+                                          />
+                                        </div>
                                       </div>
                                     </div>
                                   </div>

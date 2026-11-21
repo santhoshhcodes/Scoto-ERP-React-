@@ -9,13 +9,12 @@ import {
   TrendingUp,
   Receipt,
   Download,
-  Printer,
   RefreshCw,
   Clock,
   CheckCircle2,
   AlertCircle,
-  Layers,
   ArrowRight,
+  ArrowLeft,
   Filter,
   PieChart,
   ChevronDown,
@@ -26,14 +25,14 @@ import {
   MapPin,
   CreditCard,
   Hash,
-  ExternalLink,
   ShieldCheck,
-  Percent,
+  Eye,
 } from 'lucide-react';
 import { StatCard } from '../../../components/common';
 import {
   useCustomerClients,
   useReportFinancialYears,
+  useCustomerPortfolioSummary,
   useCustomerDossier,
   useDownloadCustomerReportExcel,
 } from '../../../api/customerReportApi';
@@ -43,18 +42,22 @@ export const CustomerReportPage = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
-  // Search & Filter State
+  // Search & Selected Customer State
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedClient, setSelectedClient] = useState(null); // { LedgerCode, LedgerName, ... }
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const { selectedFinYear, setSelectedFinYear, availableYears } = useFinancialYear();
-  const [activeTab, setActiveTab] = useState('invoices'); // 'invoices' | 'milestones' | 'timeline' | 'ledger' | 'raw_docs'
-  const [rawDocSubTab, setRawDocSubTab] = useState('invoices'); // 'quotes' | 'proformas' | 'invoices' | 'tally'
-  const [invoiceFilter, setInvoiceFilter] = useState('ALL'); // 'ALL' | 'PAID' | 'PENDING' | 'OVERDUE'
-  const [milestoneFilter, setMilestoneFilter] = useState('ALL'); // 'ALL' | 'CLEARED' | 'PARTIAL' | 'PENDING'
-  const [timelineFilter, setTimelineFilter] = useState('ALL'); // 'ALL' | 'Quotation' | 'Proforma' | 'Invoice' | 'Receipt'
-  const [ledgerFilter, setLedgerFilter] = useState('ALL'); // 'ALL' | 'DEBIT' | 'CREDIT'
+
+  // Exactly TWO Clean Reports:
+  // 'statement' -> Detailed Statement of Account (Running Ledger with GST & TDS Breakdown)
+  // 'summary'   -> Executive Summary (KPIs & Invoice Settlement Matrix)
+  const [activeTab, setActiveTab] = useState('statement');
+  const [invoiceFilter, setInvoiceFilter] = useState('ALL'); // 'ALL' | 'PAID' | 'PENDING'
+  const [ledgerFilter, setLedgerFilter] = useState('ALL');   // 'ALL' | 'DEBIT' | 'CREDIT'
   const [expandedInvoiceIdx, setExpandedInvoiceIdx] = useState(null);
+  const [portfolioTableSearch, setPortfolioTableSearch] = useState('');
+
+  const searchContainerRef = useRef(null);
 
   // Auto-select client from URL params if present
   useEffect(() => {
@@ -68,184 +71,6 @@ export const CustomerReportPage = () => {
       setSearchTerm(urlName || urlCode);
     }
   }, [searchParams, selectedClient]);
-
-  const searchContainerRef = useRef(null);
-
-  // Queries
-  const { data: clientsRes, isLoading: isLoadingClients } = useCustomerClients(searchTerm);
-
-  const clientList = useMemo(() => {
-    return clientsRes?.data?.data || clientsRes?.data || [];
-  }, [clientsRes]);
-
-  // Dossier Query for selected client
-  const {
-    data: dossierRes,
-    isLoading: isLoadingDossier,
-    isFetching: isFetchingDossier,
-    refetch: refetchDossier,
-  } = useCustomerDossier(selectedClient?.LedgerCode, selectedFinYear);
-
-  const dossier = dossierRes?.data || dossierRes;
-  const kpis = dossier?.kpis || {};
-  const customerInfo = dossier?.customer_info || selectedClient || {};
-  const milestones = dossier?.milestones || [];
-  const timeline = dossier?.timeline || [];
-  const runningLedger = dossier?.running_ledger || [];
-  const invoicesBreakdown = dossier?.invoices_breakdown || [];
-  const invoicesSummary = dossier?.invoices_summary || {};
-
-  // TAB 0: Invoices Filter
-  const filteredInvoices = useMemo(() => {
-    if (invoiceFilter === 'PAID') {
-      return invoicesBreakdown.filter((i) => i.payment_status === 'PAID' || Number(i.balance_due) <= 0.01);
-    }
-    if (invoiceFilter === 'PENDING') {
-      return invoicesBreakdown.filter((i) => (i.payment_status !== 'PAID' && Number(i.balance_due) > 0.01));
-    }
-    if (invoiceFilter === 'OVERDUE') {
-      return invoicesBreakdown.filter((i) => i.is_overdue && Number(i.balance_due) > 0.01);
-    }
-    return invoicesBreakdown;
-  }, [invoicesBreakdown, invoiceFilter]);
-
-  // TAB 1: Milestones Summary & Filter
-  const milestonesSummary = useMemo(() => {
-    let total_order_value = 0;
-    let total_collected = 0;
-    let total_pending = 0;
-    let cleared_count = 0;
-    let partial_count = 0;
-    let pending_count = 0;
-    let invoiced_count = 0;
-
-    milestones.forEach((m) => {
-      const val = Number(m.total_order_value) || 0;
-      const adv = Number(m.advance_collected) || 0;
-      const bal = Number(m.balance_pending) || 0;
-      const pct = Number(m.advance_percentage_achieved) || 0;
-
-      total_order_value += val;
-      total_collected += adv;
-      total_pending += bal;
-
-      if (pct >= 100 || (bal <= 0.01 && val > 0)) {
-        cleared_count += 1;
-      } else if (pct > 0 || adv > 0.01) {
-        partial_count += 1;
-      } else {
-        pending_count += 1;
-      }
-
-      if (m.sales_invoice_no) {
-        invoiced_count += 1;
-      }
-    });
-
-    return {
-      total_order_value,
-      total_collected,
-      total_pending,
-      cleared_count,
-      partial_count,
-      pending_count,
-      invoiced_count,
-    };
-  }, [milestones]);
-
-  const filteredMilestones = useMemo(() => {
-    if (milestoneFilter === 'CLEARED') {
-      return milestones.filter((m) => Number(m.advance_percentage_achieved) >= 100 || (Number(m.balance_pending) <= 0.01 && Number(m.total_order_value) > 0));
-    }
-    if (milestoneFilter === 'PARTIAL') {
-      return milestones.filter((m) => Number(m.advance_percentage_achieved) > 0 && Number(m.advance_percentage_achieved) < 100 && Number(m.balance_pending) > 0.01);
-    }
-    if (milestoneFilter === 'PENDING') {
-      return milestones.filter((m) => (Number(m.advance_percentage_achieved) <= 0 && Number(m.advance_collected) <= 0.01));
-    }
-    return milestones;
-  }, [milestones, milestoneFilter]);
-
-  // TAB 2: Timeline Summary & Filter
-  const timelineSummary = useMemo(() => {
-    let quote_count = 0;
-    let pi_count = 0;
-    let inv_count = 0;
-    let receipt_count = 0;
-
-    timeline.forEach((item) => {
-      const dt = String(item.doc_type || '').toLowerCase();
-      if (dt.includes('quote') || dt.includes('quotation')) quote_count += 1;
-      else if (dt.includes('proforma')) pi_count += 1;
-      else if (dt.includes('sales invoice') || dt.includes('invoice')) inv_count += 1;
-      else receipt_count += 1;
-    });
-
-    return { quote_count, pi_count, inv_count, receipt_count };
-  }, [timeline]);
-
-  const filteredTimeline = useMemo(() => {
-    if (timelineFilter === 'ALL') return timeline;
-    return timeline.filter((item) => {
-      const dt = String(item.doc_type || '').toLowerCase();
-      if (timelineFilter === 'Quotation') return dt.includes('quote');
-      if (timelineFilter === 'Proforma') return dt.includes('proforma');
-      if (timelineFilter === 'Invoice') return dt.includes('invoice') && !dt.includes('proforma');
-      if (timelineFilter === 'Receipt') return dt.includes('receipt') || dt.includes('tally') || dt.includes('voucher') || dt.includes('payment');
-      return true;
-    });
-  }, [timeline, timelineFilter]);
-
-  // TAB 3: Running Ledger Summary & Filter
-  const ledgerSummary = useMemo(() => {
-    let total_debits = 0;
-    let total_credits = 0;
-    let debit_count = 0;
-    let credit_count = 0;
-
-    runningLedger.forEach((r) => {
-      if (r.voucher_type === 'Opening') return;
-      const dr = Number(r.debit) || 0;
-      const cr = Number(r.credit) || 0;
-      if (dr > 0) {
-        total_debits += dr;
-        debit_count += 1;
-      }
-      if (cr > 0) {
-        total_credits += cr;
-        credit_count += 1;
-      }
-    });
-
-    const closing_balance = runningLedger.length > 0 ? (runningLedger[runningLedger.length - 1].running_balance ?? 0) : 0;
-    const op_row = runningLedger.find((r) => r.voucher_type === 'Opening');
-    const op_balance = op_row ? (op_row.debit > 0 ? op_row.debit : op_row.credit > 0 ? -op_row.credit : 0) : 0;
-
-    return {
-      total_debits,
-      total_credits,
-      debit_count,
-      credit_count,
-      closing_balance,
-      op_balance,
-    };
-  }, [runningLedger]);
-
-  const filteredLedger = useMemo(() => {
-    if (ledgerFilter === 'DEBIT') return runningLedger.filter((r) => r.voucher_type === 'Opening' || Number(r.debit) > 0);
-    if (ledgerFilter === 'CREDIT') return runningLedger.filter((r) => r.voucher_type === 'Opening' || Number(r.credit) > 0);
-    return runningLedger;
-  }, [runningLedger, ledgerFilter]);
-
-  // TAB 4: Total Raw Documents Count
-  const allDocsCount = useMemo(() => {
-    return (
-      (dossier?.sales_invoices || []).length +
-      (dossier?.proformas || []).length +
-      (dossier?.quotations || []).length +
-      (dossier?.tally_vouchers || []).length
-    );
-  }, [dossier]);
 
   // Close search dropdown on click outside
   useEffect(() => {
@@ -267,38 +92,175 @@ export const CustomerReportPage = () => {
     })}`;
   };
 
-  // Format Approval Status (never show raw 0 or 1)
-  const formatApprovalStatus = (val) => {
-    if (val === null || val === undefined) return 'Pending';
-    const s = String(val).trim().toLowerCase();
-    if (s === '1' || s === 'approved' || s === 'approve' || s === 'cleared') return 'Approved';
-    if (s === '0' || s === 'pending' || s === 'add' || s === '' || s === 'issued') return 'Pending';
-    if (s === 'rejected' || s === 'cancelled' || s === 'cancel' || s === '2') return 'Rejected';
-    return String(val);
-  };
+  // 1. Portfolio-level Financial Analytics Query (Industry Overview)
+  const {
+    data: portfolioRes,
+    isLoading: isLoadingPortfolio,
+    refetch: refetchPortfolio,
+  } = useCustomerPortfolioSummary(selectedFinYear);
+
+  const portfolioSummary = useMemo(() => {
+    return portfolioRes?.data?.data || portfolioRes?.data || {};
+  }, [portfolioRes]);
+
+  const topOutstandingClients = useMemo(() => {
+    const clients = portfolioSummary?.top_outstanding_clients || [];
+    if (!portfolioTableSearch.trim()) return clients;
+    const term = portfolioTableSearch.trim().toLowerCase();
+    return clients.filter(
+      (c) =>
+        (c.client_name || '').toLowerCase().includes(term) ||
+        (c.client_code || '').toLowerCase().includes(term) ||
+        (c.city || '').toLowerCase().includes(term) ||
+        (c.state || '').toLowerCase().includes(term)
+    );
+  }, [portfolioSummary, portfolioTableSearch]);
+
+  // 2. Client Autocomplete Query
+  const { data: clientsRes, isLoading: isLoadingClients } = useCustomerClients(searchTerm);
+
+  const clientList = useMemo(() => {
+    return clientsRes?.data?.data || clientsRes?.data || [];
+  }, [clientsRes]);
+
+  // 3. Customer 360 Dossier Query for selected client
+  const {
+    data: dossierRes,
+    isLoading: isLoadingDossier,
+    isFetching: isFetchingDossier,
+    refetch: refetchDossier,
+  } = useCustomerDossier(selectedClient?.LedgerCode, selectedFinYear);
+
+  const dossier = dossierRes?.data || dossierRes;
+  const kpis = dossier?.kpis || {};
+  const customerInfo = dossier?.customer_info || selectedClient || {};
+  const runningLedger = dossier?.running_ledger || [];
+  const invoicesBreakdown = dossier?.invoices_breakdown || [];
+  const invoicesSummary = dossier?.invoices_summary || {};
+
+  // Filtered Invoices (for Executive Summary Report)
+  const filteredInvoices = useMemo(() => {
+    if (invoiceFilter === 'PAID') {
+      return invoicesBreakdown.filter(
+        (i) => i.payment_status === 'PAID' || Number(i.balance_due) <= 0.01
+      );
+    }
+    if (invoiceFilter === 'PENDING') {
+      return invoicesBreakdown.filter(
+        (i) => i.payment_status !== 'PAID' && Number(i.balance_due) > 0.01
+      );
+    }
+    return invoicesBreakdown;
+  }, [invoicesBreakdown, invoiceFilter]);
+
+  // Running Ledger Summary & Filter (for Statement of Account Report)
+  const ledgerSummary = useMemo(() => {
+    let total_debits = 0;
+    let total_credits = 0;
+    let total_taxable = 0;
+    let total_cgst = 0;
+    let total_sgst = 0;
+    let total_igst = 0;
+    let total_gst = 0;
+    let total_tds = 0;
+    let total_net_received = 0;
+    let debit_count = 0;
+    let credit_count = 0;
+
+    runningLedger.forEach((r) => {
+      if (r.voucher_type === 'Opening') return;
+      const dr = Number(r.debit) || 0;
+      const cr = Number(r.credit) || 0;
+      const tax = Number(r.taxable_amt) || 0;
+      const cgst = Number(r.cgst_amt) || 0;
+      const sgst = Number(r.sgst_amt) || 0;
+      const igst = Number(r.igst_amt) || 0;
+      const gst = Number(r.total_gst) || 0;
+      const tds = Number(r.tds_amt) || 0;
+      const net_rcvd = Number(r.net_received) || 0;
+
+      if (dr > 0) {
+        total_debits += dr;
+        debit_count += 1;
+        total_taxable += tax;
+        total_cgst += cgst;
+        total_sgst += sgst;
+        total_igst += igst;
+        total_gst += gst;
+      }
+      if (cr > 0) {
+        total_credits += cr;
+        credit_count += 1;
+        total_tds += tds;
+        total_net_received += net_rcvd;
+      }
+    });
+
+    const closing_balance =
+      runningLedger.length > 0
+        ? runningLedger[runningLedger.length - 1].running_balance ?? 0
+        : 0;
+    const op_row = runningLedger.find((r) => r.voucher_type === 'Opening');
+    const op_balance = op_row
+      ? op_row.debit > 0
+        ? op_row.debit
+        : op_row.credit > 0
+        ? -op_row.credit
+        : 0
+      : 0;
+
+    return {
+      total_debits,
+      total_credits,
+      total_taxable,
+      total_cgst,
+      total_sgst,
+      total_igst,
+      total_gst,
+      total_tds,
+      total_net_received,
+      debit_count,
+      credit_count,
+      closing_balance,
+      op_balance,
+    };
+  }, [runningLedger]);
+
+  const filteredLedger = useMemo(() => {
+    if (ledgerFilter === 'DEBIT')
+      return runningLedger.filter(
+        (r) => r.voucher_type === 'Opening' || Number(r.debit) > 0
+      );
+    if (ledgerFilter === 'CREDIT')
+      return runningLedger.filter(
+        (r) => r.voucher_type === 'Opening' || Number(r.credit) > 0
+      );
+    return runningLedger;
+  }, [runningLedger, ledgerFilter]);
 
   // Backend Excel Download Mutation
   const downloadExcelMutation = useDownloadCustomerReportExcel();
 
-  // Export to Excel handler via Backend Service
-  const handleExportExcel = async (tab = 'ALL') => {
+  const handleExportExcel = async () => {
     if (!selectedClient) return;
-
     try {
       await downloadExcelMutation.mutateAsync({
         clientCode: selectedClient.LedgerCode,
         finYear: selectedFinYear,
-        tab,
+        tab: 'ALL',
       });
     } catch (err) {
       console.error('Failed to export Customer Dossier Excel:', err);
-      alert('Failed to download Customer Dossier Excel: ' + (err.response?.data?.detail || err.message || 'Error'));
+      alert(
+        'Failed to download Customer Dossier Excel: ' +
+          (err.response?.data?.detail || err.message || 'Error')
+      );
     }
   };
 
   return (
     <div className="space-y-6 p-4 lg:p-6 bg-slate-50 min-h-screen text-slate-800">
-      {/* 1. Header Toolbar & Search Bar */}
+      {/* 1. TOP HEADER TOOLBAR */}
       <div className="bg-white rounded-xl shadow-xs border border-slate-200/80 p-4 lg:p-5">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
@@ -307,14 +269,28 @@ export const CustomerReportPage = () => {
               <span>Customer 360 Financial Analytics</span>
             </div>
             <h1 className="text-xl lg:text-2xl font-bold text-slate-900 mt-1">
-              Customer Wise Report & Ledger Dossier
+              Customer Wise Report & Financial Dossier
             </h1>
             <p className="text-xs text-slate-500 mt-0.5">
-              Unified cross-document lifecycle: Quotation &rarr; Proforma &rarr; Customer Advance &rarr; Sales Invoice &rarr; Ledger
+              Two clean official accounting reports: Statement of Account &amp; Executive Settlement Summary
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
+            {/* Back to Portfolio Overview Button (when customer selected) */}
+            {selectedClient && (
+              <button
+                onClick={() => {
+                  setSelectedClient(null);
+                  setSearchTerm('');
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 transition-all cursor-pointer"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span>Portfolio Overview</span>
+              </button>
+            )}
+
             {/* Financial Year Selector */}
             <div className="flex items-center gap-1.5 bg-slate-100/90 rounded-lg p-1 border border-slate-200">
               <Calendar className="w-4 h-4 text-slate-500 ml-2" />
@@ -334,28 +310,39 @@ export const CustomerReportPage = () => {
 
             {/* Refresh Button */}
             <button
-              onClick={() => refetchDossier()}
-              disabled={!selectedClient || isFetchingDossier}
+              onClick={() => {
+                if (selectedClient) refetchDossier();
+                else refetchPortfolio();
+              }}
+              disabled={isFetchingDossier || isLoadingPortfolio}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 transition-all shadow-2xs disabled:opacity-50 cursor-pointer"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${isFetchingDossier ? 'animate-spin text-indigo-600' : ''}`} />
+              <RefreshCw
+                className={`w-3.5 h-3.5 ${
+                  isFetchingDossier || isLoadingPortfolio ? 'animate-spin text-indigo-600' : ''
+                }`}
+              />
               <span>Refresh</span>
             </button>
 
-            {/* Export Excel Button (Backend Executive Multi-Sheet Workbook) */}
-            <button
-              onClick={() => handleExportExcel(activeTab)}
-              disabled={!selectedClient || !dossier || downloadExcelMutation.isPending}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 transition-all shadow-2xs disabled:opacity-50 cursor-pointer"
-              title="Download Executive Customer Dossier in Excel (.xlsx)"
-            >
-              {downloadExcelMutation.isPending ? (
-                <div className="w-3.5 h-3.5 border-2 border-slate-400 border-t-slate-700 rounded-full animate-spin" />
-              ) : (
-                <Download className="w-3.5 h-3.5 text-emerald-600" />
-              )}
-              <span>{downloadExcelMutation.isPending ? 'Generating Excel...' : 'Export Excel (.xlsx)'}</span>
-            </button>
+            {/* Export 2-Report Excel Button (When Client is Selected) */}
+            {selectedClient && (
+              <button
+                onClick={handleExportExcel}
+                disabled={!dossier || downloadExcelMutation.isPending}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-all shadow-xs disabled:opacity-50 cursor-pointer"
+                title="Download 2-Report Executive Excel Workbook (.xlsx)"
+              >
+                {downloadExcelMutation.isPending ? (
+                  <div className="w-3.5 h-3.5 border-2 border-white/50 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <Download className="w-3.5 h-3.5" />
+                )}
+                <span>
+                  {downloadExcelMutation.isPending ? 'Generating Excel...' : 'Export Excel (.xlsx)'}
+                </span>
+              </button>
+            )}
 
             {/* Record Payment / Advance Button */}
             <button
@@ -370,10 +357,10 @@ export const CustomerReportPage = () => {
                   navigate('/transaction/receipts/new');
                 }
               }}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-all shadow-xs cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-all shadow-xs cursor-pointer"
             >
               <CreditCard className="w-3.5 h-3.5" />
-              <span>Record Receipt / Advance</span>
+              <span>Record Receipt</span>
             </button>
           </div>
         </div>
@@ -393,7 +380,7 @@ export const CustomerReportPage = () => {
                 setIsSearchOpen(true);
               }}
               onFocus={() => setIsSearchOpen(true)}
-              placeholder="Type customer name, client code (e.g. CUS/00010), GSTIN, or city..."
+              placeholder="Search customer name, client code (e.g. CUS/00010), GSTIN, or city..."
               className="w-full pl-10 pr-4 py-2.5 text-sm bg-slate-50 border border-slate-300 rounded-lg text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
             />
           </div>
@@ -402,7 +389,9 @@ export const CustomerReportPage = () => {
           {isSearchOpen && (
             <div className="absolute z-50 left-0 right-0 mt-1 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-xl divide-y divide-slate-100">
               {isLoadingClients ? (
-                <div className="p-4 text-center text-xs text-slate-500">Loading client directory...</div>
+                <div className="p-4 text-center text-xs text-slate-500">
+                  Loading client directory...
+                </div>
               ) : clientList.length === 0 ? (
                 <div className="p-4 text-center text-xs text-slate-500">
                   No clients found matching "{searchTerm}"
@@ -417,11 +406,15 @@ export const CustomerReportPage = () => {
                       setIsSearchOpen(false);
                     }}
                     className={`p-3 text-left hover:bg-indigo-50/70 transition-colors cursor-pointer flex items-center justify-between ${
-                      selectedClient?.LedgerCode === client.LedgerCode ? 'bg-indigo-50/90 border-l-4 border-indigo-600' : ''
+                      selectedClient?.LedgerCode === client.LedgerCode
+                        ? 'bg-indigo-50/90 border-l-4 border-indigo-600'
+                        : ''
                     }`}
                   >
                     <div>
-                      <div className="font-semibold text-sm text-slate-900">{client.LedgerName}</div>
+                      <div className="font-semibold text-sm text-slate-900">
+                        {client.LedgerName}
+                      </div>
                       <div className="flex flex-wrap items-center gap-2 mt-1 text-xs text-slate-500">
                         <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded text-slate-700 font-semibold">
                           {client.LedgerCode}
@@ -444,24 +437,164 @@ export const CustomerReportPage = () => {
         </div>
       </div>
 
-      {/* When No Client is Selected */}
+      {/* ========================================================================= */}
+      {/* 2. PORTFOLIO & INDUSTRY OVERVIEW DASHBOARD (WHEN NO CLIENT IS SELECTED) */}
+      {/* ========================================================================= */}
       {!selectedClient && (
-        <div className="bg-white rounded-xl border border-dashed border-slate-300 p-12 text-center">
-          <div className="w-16 h-16 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto mb-4">
-            <Building2 className="w-8 h-8" />
+        <div className="space-y-6">
+          {/* Top KPI Cards for Industry / Portfolio Level */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+            <StatCard
+              title="Total Active Clients"
+              value={portfolioSummary?.total_clients_count || 0}
+              icon={Building2}
+              color="indigo"
+              subtitle={`Registered in ${selectedFinYear === 'ALL' ? 'All FYs' : `FY ${selectedFinYear}`}`}
+            />
+            <StatCard
+              title="Total Invoiced / Turnover"
+              value={fmt(portfolioSummary?.total_portfolio_invoiced || 0)}
+              icon={TrendingUp}
+              color="blue"
+              trend={fmt(portfolioSummary?.total_portfolio_gst || 0)}
+              trendType="up"
+              changeLabel="GST Billed"
+              subtitle="Gross sales invoices billed"
+            />
+            <StatCard
+              title="Total Collections"
+              value={fmt(portfolioSummary?.total_portfolio_collections || 0)}
+              icon={CheckCircle2}
+              color="emerald"
+              subtitle="Received via Bank & Cash"
+            />
+            <StatCard
+              title="Total TDS Withheld"
+              value={fmt(portfolioSummary?.total_portfolio_tds || 0)}
+              icon={Receipt}
+              color="amber"
+              subtitle="Tax credit in 26AS"
+            />
+            <StatCard
+              title="Overall Portfolio Outstanding"
+              value={fmt(portfolioSummary?.total_portfolio_outstanding || 0)}
+              icon={AlertCircle}
+              color="rose"
+              trend={`${portfolioSummary?.top_outstanding_clients?.length || 0}`}
+              trendType="down"
+              changeLabel="Debtors with Balance"
+              className="border-rose-300 bg-gradient-to-br from-white to-rose-50/30"
+              subtitle="Net uncollected balance"
+            />
           </div>
-          <h3 className="text-base font-bold text-slate-800">No Customer Selected</h3>
-          <p className="text-sm text-slate-500 max-w-md mx-auto mt-1">
-            Search for a customer above to view their full company details, yearly transaction summary,
-            percentage-wise advance tracking, and statement of account.
-          </p>
+
+          {/* Top Outstanding Clients / Debtors Portfolio Table */}
+          <div className="bg-white rounded-xl shadow-xs border border-slate-200/80 p-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+              <div>
+                <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <Building2 className="w-4 h-4 text-indigo-600" />
+                  <span>Top Outstanding Clients &amp; Receivables Exposure</span>
+                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-rose-100 text-rose-700">
+                    {topOutstandingClients.length} clients
+                  </span>
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Click on "View 360 Dossier" on any client to view their detailed 2-report statement and export Excel.
+                </p>
+              </div>
+
+              {/* Quick filter within portfolio table */}
+              <div className="relative min-w-[220px]">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={portfolioTableSearch}
+                  onChange={(e) => setPortfolioTableSearch(e.target.value)}
+                  placeholder="Filter client or city..."
+                  className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                />
+              </div>
+            </div>
+
+            {topOutstandingClients.length === 0 ? (
+              <div className="p-8 text-center text-xs text-slate-500 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                No outstanding clients match your filter in {selectedFinYear}.
+              </div>
+            ) : (
+              <div className="overflow-x-auto rounded-lg border border-slate-200">
+                <table className="min-w-full divide-y divide-slate-200 text-left text-xs">
+                  <thead className="bg-slate-100 text-slate-700 font-bold uppercase tracking-wider text-[10px]">
+                    <tr>
+                      <th className="px-3.5 py-3">Client Code</th>
+                      <th className="px-3.5 py-3">Customer / Company Name</th>
+                      <th className="px-3.5 py-3">City / State</th>
+                      <th className="px-3.5 py-3">GSTIN</th>
+                      <th className="px-3.5 py-3 text-right">Total Invoiced (₹)</th>
+                      <th className="px-3.5 py-3 text-right">Total Collections (₹)</th>
+                      <th className="px-3.5 py-3 text-right">TDS Deducted (₹)</th>
+                      <th className="px-3.5 py-3 text-right">Net Outstanding (₹)</th>
+                      <th className="px-3.5 py-3 text-center">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {topOutstandingClients.map((client) => (
+                      <tr key={client.client_code} className="hover:bg-indigo-50/40 transition-colors">
+                        <td className="px-3.5 py-3 font-mono font-bold text-slate-700">
+                          {client.client_code}
+                        </td>
+                        <td className="px-3.5 py-3 font-semibold text-slate-900">
+                          {client.client_name}
+                        </td>
+                        <td className="px-3.5 py-3 text-slate-600">
+                          {[client.city, client.state].filter(Boolean).join(', ') || '-'}
+                        </td>
+                        <td className="px-3.5 py-3 font-mono text-[11px] text-slate-600">
+                          {client.gst_no || 'UR'}
+                        </td>
+                        <td className="px-3.5 py-3 text-right font-mono font-semibold text-slate-800">
+                          {fmt(client.total_invoiced)}
+                        </td>
+                        <td className="px-3.5 py-3 text-right font-mono font-semibold text-emerald-700">
+                          {fmt(client.total_collections)}
+                        </td>
+                        <td className="px-3.5 py-3 text-right font-mono text-amber-700">
+                          {fmt(client.total_tds)}
+                        </td>
+                        <td className="px-3.5 py-3 text-right font-mono font-bold text-rose-700">
+                          {fmt(client.net_outstanding)}
+                        </td>
+                        <td className="px-3.5 py-3 text-center">
+                          <button
+                            onClick={() => {
+                              setSelectedClient({
+                                LedgerCode: client.client_code,
+                                LedgerName: client.client_name,
+                              });
+                              setSearchTerm(client.client_name);
+                            }}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-md bg-indigo-600 text-white hover:bg-indigo-700 transition-colors cursor-pointer shadow-2xs"
+                          >
+                            <Eye className="w-3 h-3" />
+                            <span>View 360</span>
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
-      {/* When Client is Selected */}
+      {/* ========================================================================= */}
+      {/* 3. CUSTOMER 360 DOSSIER & THE TWO REPORTS (WHEN CLIENT IS SELECTED)       */}
+      {/* ========================================================================= */}
       {selectedClient && (
-        <>
-          {/* 2. Customer Master Dossier Profile Card */}
+        <div className="space-y-6">
+          {/* Customer Master Dossier Profile Card (Client KYC Only - Issuing company removed from screen) */}
           <div className="bg-white rounded-xl shadow-xs border border-slate-200/80 p-5">
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
               <div className="flex items-start gap-3.5">
@@ -471,7 +604,7 @@ export const CustomerReportPage = () => {
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
                     <h2 className="text-lg font-bold text-slate-900">{customerInfo.LedgerName}</h2>
-                    <span className="text-[11px] font-mono bg-indigo-50 border border-indigo-200 text-indigo-700 font-bold px-2 py-0.5 rounded-full">
+                    <span className="text-[11px] font-mono bg-indigo-50 border border-indigo-200 text-indigo-700 font-bold px-2.5 py-0.5 rounded-full">
                       {customerInfo.LedgerCode}
                     </span>
                     <span className="text-[11px] bg-slate-100 text-slate-600 font-semibold px-2 py-0.5 rounded-full">
@@ -480,14 +613,14 @@ export const CustomerReportPage = () => {
                   </div>
                   {customerInfo.ChequePrintName && customerInfo.ChequePrintName !== customerInfo.LedgerName && (
                     <div className="text-xs text-slate-500 mt-0.5">
-                      Legal/Trade Name: <span className="font-medium text-slate-700">{customerInfo.ChequePrintName}</span>
+                      Legal / Trade Name: <span className="font-medium text-slate-700">{customerInfo.ChequePrintName}</span>
                     </div>
                   )}
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mt-2.5 text-xs text-slate-600">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mt-2 text-xs text-slate-600">
                     {customerInfo.GSTNo ? (
                       <span className="flex items-center gap-1 font-mono text-emerald-800 bg-emerald-50/80 border border-emerald-200 px-2 py-0.5 rounded">
                         <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                        GST: {customerInfo.GSTNo}
+                        GSTIN: {customerInfo.GSTNo}
                       </span>
                     ) : (
                       <span className="text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
@@ -499,10 +632,13 @@ export const CustomerReportPage = () => {
                         PAN: {customerInfo.PanNo}
                       </span>
                     )}
-                    {(customerInfo.City || customerInfo.State) && (
+                    {(customerInfo.Add1 || customerInfo.City || customerInfo.State) && (
                       <span className="flex items-center gap-1">
                         <MapPin className="w-3.5 h-3.5 text-slate-400" />
-                        {[customerInfo.City, customerInfo.State].filter(Boolean).join(', ')}
+                        {[customerInfo.Add1, customerInfo.Add2, customerInfo.City, customerInfo.State]
+                          .filter(Boolean)
+                          .join(', ')}
+                        {customerInfo.PinCode ? ` - ${customerInfo.PinCode}` : ''}
                       </span>
                     )}
                     {customerInfo.MobileNo && (
@@ -521,12 +657,13 @@ export const CustomerReportPage = () => {
                 </div>
               </div>
 
-              <div className="bg-slate-50 rounded-xl p-3 border border-slate-200/80 flex flex-col items-end justify-center min-w-[200px]">
+              {/* Net Ledger Balance Box */}
+              <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-200/80 flex flex-col items-end justify-center min-w-[210px]">
                 <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                  Net Ledger Balance
+                  Net Balance Due
                 </span>
                 <span
-                  className={`text-xl font-black mt-0.5 ${
+                  className={`text-xl font-black font-mono mt-0.5 ${
                     kpis.closing_balance > 0
                       ? 'text-rose-600'
                       : kpis.closing_balance < 0
@@ -535,181 +672,121 @@ export const CustomerReportPage = () => {
                   }`}
                 >
                   {fmt(Math.abs(kpis.closing_balance || 0))}
-                  <span className="text-xs font-semibold ml-1">
+                  <span className="text-xs font-semibold ml-1 font-sans">
                     {kpis.closing_balance > 0 ? 'Dr (Due)' : kpis.closing_balance < 0 ? 'Cr (Advance)' : 'Nil'}
                   </span>
                 </span>
-                <span className="text-[10px] text-slate-400 mt-0.5">
+                <span className="text-[10px] text-slate-400 mt-1">
                   Opening: {fmt(customerInfo.OpeningBalance || 0)} ({customerInfo.BalanceType || 'Dr'})
                 </span>
               </div>
             </div>
           </div>
 
-          {/* 3. High-Level KPI Stat Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <StatCard
-              title="Total Quoted"
-              value={fmt(kpis.total_quoted_amount || 0)}
-              icon={FileText}
-              color="indigo"
-              changeLabel={`${kpis.total_quotations_count || 0} Quotations Issued`}
-            />
-
-            <StatCard
-              title="Total Invoiced"
-              value={fmt(invoicesSummary.total_invoiced || kpis.total_invoiced_amount || 0)}
-              icon={Receipt}
-              color="blue"
-              changeLabel={`${invoicesSummary.total_invoices_count || kpis.total_sales_invoices_count || 0} Sales Invoices Raised`}
-            />
-
-            <StatCard
-              title="Total Collections / Receipts"
-              value={fmt(invoicesSummary.total_paid || kpis.total_collections || kpis.total_tally_receipts_amount || 0)}
-              icon={DollarSign}
-              color="emerald"
-              changeLabel={`${invoicesSummary.paid_count || 0} Paid • ${invoicesSummary.partial_count || 0} Partial`}
-            />
-
-            <StatCard
-              title="Balance Due (Receivable)"
-              value={fmt(invoicesSummary.total_balance_due != null ? invoicesSummary.total_balance_due : (kpis.net_outstanding || 0))}
-              icon={TrendingUp}
-              color={(invoicesSummary.total_balance_due || 0) > 0 ? 'rose' : 'emerald'}
-              changeLabel={
-                (invoicesSummary.total_balance_due || 0) > 0
-                  ? `${invoicesSummary.pending_count || 0} Invoices Pending Payment`
-                  : 'All Invoices Fully Cleared'
-              }
-            />
-          </div>
-
-          {/* 4. Tabbed Content Interface */}
+          {/* TWO REPORT TABS NAVIGATION */}
           <div className="bg-white rounded-xl shadow-xs border border-slate-200/80 overflow-hidden">
-            {/* Tab Bar */}
-            <div className="border-b border-slate-200 px-4 pt-3 flex flex-wrap gap-2 bg-slate-50/60">
+            <div className="flex border-b border-slate-200 bg-slate-50/70 px-4 pt-3 gap-2">
               <button
-                onClick={() => setActiveTab('invoices')}
-                className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold rounded-t-lg transition-all cursor-pointer ${
-                  activeTab === 'invoices'
+                onClick={() => setActiveTab('statement')}
+                className={`flex items-center gap-2 px-5 py-3 text-xs font-bold rounded-t-lg transition-all cursor-pointer ${
+                  activeTab === 'statement'
                     ? 'bg-white text-indigo-700 border-t-2 border-indigo-600 shadow-xs'
                     : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                 }`}
               >
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Invoices & Payments ({invoicesBreakdown.length})</span>
+                <Receipt className="w-4 h-4" />
+                <span>Statement of Account (Running Ledger)</span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700 font-mono">
+                  {runningLedger.length}
+                </span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('summary')}
+                className={`flex items-center gap-2 px-5 py-3 text-xs font-bold rounded-t-lg transition-all cursor-pointer ${
+                  activeTab === 'summary'
+                    ? 'bg-white text-indigo-700 border-t-2 border-indigo-600 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                }`}
+              >
+                <FileText className="w-4 h-4" />
+                <span>Invoices &amp; Payments (Settlement Matrix)</span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-mono">
+                  {invoicesBreakdown.length}
+                </span>
                 {invoicesSummary.pending_count > 0 && (
                   <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-700">
                     {invoicesSummary.pending_count} Due
                   </span>
                 )}
-                {invoicesSummary.paid_count > 0 && (
-                  <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700">
-                    {invoicesSummary.paid_count} Paid
-                  </span>
-                )}
-              </button>
-
-              <button
-                onClick={() => setActiveTab('milestones')}
-                className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold rounded-t-lg transition-all cursor-pointer ${
-                  activeTab === 'milestones'
-                    ? 'bg-white text-indigo-700 border-t-2 border-indigo-600 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                }`}
-              >
-                <Percent className="w-3.5 h-3.5" />
-                <span>Percentage Milestones & Advance ({milestones.length})</span>
-              </button>
-
-              <button
-                onClick={() => setActiveTab('timeline')}
-                className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold rounded-t-lg transition-all cursor-pointer ${
-                  activeTab === 'timeline'
-                    ? 'bg-white text-indigo-700 border-t-2 border-indigo-600 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                }`}
-              >
-                <Clock className="w-3.5 h-3.5" />
-                <span>Document Lifecycle Timeline ({timeline.length})</span>
-              </button>
-
-              <button
-                onClick={() => setActiveTab('ledger')}
-                className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold rounded-t-lg transition-all cursor-pointer ${
-                  activeTab === 'ledger'
-                    ? 'bg-white text-indigo-700 border-t-2 border-indigo-600 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                }`}
-              >
-                <Receipt className="w-3.5 h-3.5" />
-                <span>Statement of Account (Running Balance) ({runningLedger.length})</span>
-              </button>
-
-              <button
-                onClick={() => setActiveTab('raw_docs')}
-                className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold rounded-t-lg transition-all cursor-pointer ${
-                  activeTab === 'raw_docs'
-                    ? 'bg-white text-indigo-700 border-t-2 border-indigo-600 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                }`}
-              >
-                <Layers className="w-3.5 h-3.5" />
-                <span>All Documents View ({allDocsCount})</span>
               </button>
             </div>
 
-            {/* TAB 0: INVOICES & PAYMENT STATUS TRACKER */}
-            {activeTab === 'invoices' && (
+            {/* =================================================================== */}
+            {/* REPORT 1: STATEMENT OF ACCOUNT (DETAILED LEDGER WITH GST & TDS)    */}
+            {/* =================================================================== */}
+            {activeTab === 'statement' && (
               <div className="p-4 lg:p-6 space-y-5">
-                {/* Summary banner */}
+                {/* 4 Summary Cards */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5">
                     <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
-                      Total Invoiced Value
+                      Opening Balance
                     </span>
                     <span className="text-base font-black text-slate-900 font-mono mt-0.5 block">
-                      {fmt(invoicesSummary.total_invoiced || 0)}
+                      {fmt(Math.abs(ledgerSummary.op_balance))}
                     </span>
                     <span className="text-[10px] text-slate-400 mt-1 block">
-                      {invoicesSummary.total_invoices_count || 0} Total Sales Invoices
+                      {ledgerSummary.op_balance > 0
+                        ? 'Debit (Due from Customer)'
+                        : ledgerSummary.op_balance < 0
+                        ? 'Credit (Advance)'
+                        : 'Nil Opening'}
                     </span>
                   </div>
 
-                  <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-3.5">
-                    <span className="text-[11px] font-semibold text-emerald-700 uppercase tracking-wider block">
-                      Total Payments Collected
-                    </span>
-                    <span className="text-base font-black text-emerald-800 font-mono mt-0.5 block">
-                      {fmt(invoicesSummary.total_paid || 0)}
-                    </span>
-                    <span className="text-[10px] text-emerald-600 mt-1 block">
-                      {invoicesSummary.paid_count || 0} Fully Paid • {invoicesSummary.partial_count || 0} Partial
-                    </span>
-                  </div>
-
-                  <div className="rounded-xl border border-rose-200 bg-rose-50/50 p-3.5">
+                  <div className="rounded-xl border border-rose-200 bg-rose-50/40 p-3.5">
                     <span className="text-[11px] font-semibold text-rose-700 uppercase tracking-wider block">
-                      Balance Due (Unpaid)
+                      Total Invoiced (Debits)
                     </span>
                     <span className="text-base font-black text-rose-800 font-mono mt-0.5 block">
-                      {fmt(invoicesSummary.total_balance_due || 0)}
+                      {fmt(ledgerSummary.total_debits)}
                     </span>
                     <span className="text-[10px] text-rose-600 mt-1 block">
-                      {invoicesSummary.pending_count || 0} Invoices Pending Payment
+                      Taxable: {fmt(ledgerSummary.total_taxable)} | GST: {fmt(ledgerSummary.total_gst)}
                     </span>
                   </div>
 
-                  <div className="rounded-xl border border-indigo-200 bg-indigo-50/50 p-3.5">
-                    <span className="text-[11px] font-semibold text-indigo-700 uppercase tracking-wider block">
-                      Unallocated Customer Advance
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-3.5">
+                    <span className="text-[11px] font-semibold text-emerald-700 uppercase tracking-wider block">
+                      Total Settled (Credits)
                     </span>
-                    <span className="text-base font-black text-indigo-800 font-mono mt-0.5 block">
-                      {fmt(invoicesSummary.unallocated_receipts_amount || 0)}
+                    <span className="text-base font-black text-emerald-800 font-mono mt-0.5 block">
+                      {fmt(ledgerSummary.total_credits)}
+                    </span>
+                    <span className="text-[10px] text-emerald-600 mt-1 block">
+                      Bank: {fmt(ledgerSummary.total_net_received)} | TDS: {fmt(ledgerSummary.total_tds)}
+                    </span>
+                  </div>
+
+                  <div className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-3.5">
+                    <span className="text-[11px] font-semibold text-indigo-700 uppercase tracking-wider block">
+                      Net Closing Balance
+                    </span>
+                    <span className="text-base font-black text-indigo-900 font-mono mt-0.5 block">
+                      {fmt(Math.abs(ledgerSummary.closing_balance))}
+                      <span className="text-xs font-bold ml-1 text-indigo-700">
+                        {ledgerSummary.closing_balance > 0
+                          ? 'Dr (Due)'
+                          : ledgerSummary.closing_balance < 0
+                          ? 'Cr (Advance)'
+                          : 'Nil'}
+                      </span>
                     </span>
                     <span className="text-[10px] text-indigo-600 mt-1 block">
-                      {invoicesSummary.unallocated_receipts_amount > 0 ? 'Credit available for future invoices' : 'Fully allocated to invoices'}
+                      {ledgerSummary.closing_balance > 0
+                        ? 'Receivable from customer'
+                        : 'Settled / In Advance'}
                     </span>
                   </div>
                 </div>
@@ -718,13 +795,285 @@ export const CustomerReportPage = () => {
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-2">
                   <div>
                     <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                      <span>Sales Invoices & Collection Status</span>
+                      <span>Statement of Account (Sales Invoices &amp; Receipts Ledger)</span>
                       <span className="text-xs font-normal text-slate-500">
-                        ({filteredInvoices.length} showing)
+                        ({filteredLedger.length} entries)
                       </span>
                     </h3>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      Clear invoice-by-invoice breakdown showing paid vs pending balances, overdue age, and matched payment receipts.
+                      Debits represent billed Sales Invoices; Credits represent Bank receipts and TDS deductions.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {/* Filter Pills */}
+                    <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-lg text-xs font-semibold">
+                      <button
+                        onClick={() => setLedgerFilter('ALL')}
+                        className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
+                          ledgerFilter === 'ALL'
+                            ? 'bg-white text-slate-900 shadow-2xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        All ({runningLedger.length})
+                      </button>
+                      <button
+                        onClick={() => setLedgerFilter('DEBIT')}
+                        className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
+                          ledgerFilter === 'DEBIT'
+                            ? 'bg-rose-600 text-white shadow-2xs'
+                            : 'text-slate-600 hover:text-rose-700'
+                        }`}
+                      >
+                        Invoices Only ({ledgerSummary.debit_count})
+                      </button>
+                      <button
+                        onClick={() => setLedgerFilter('CREDIT')}
+                        className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
+                          ledgerFilter === 'CREDIT'
+                            ? 'bg-emerald-600 text-white shadow-2xs'
+                            : 'text-slate-600 hover:text-emerald-700'
+                        }`}
+                      >
+                        Receipts Only ({ledgerSummary.credit_count})
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {filteredLedger.length === 0 ? (
+                  <div className="text-center py-12 text-xs text-slate-500 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                    No ledger transactions found in {selectedFinYear}.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto rounded-xl border border-slate-200">
+                    <table className="min-w-full divide-y divide-slate-200 text-left text-xs">
+                      <thead className="bg-slate-100 text-slate-700 font-bold uppercase tracking-wider text-[10px]">
+                        <tr>
+                          <th className="px-3 py-3 text-center">Date</th>
+                          <th className="px-3 py-3 text-center">Voucher Type</th>
+                          <th className="px-3 py-3 text-center">Doc / Ref No</th>
+                          <th className="px-3 py-3">Particulars / Narration</th>
+                          <th className="px-3 py-3 text-right">Taxable (₹)</th>
+                          <th className="px-3 py-3 text-right">CGST (₹)</th>
+                          <th className="px-3 py-3 text-right">SGST (₹)</th>
+                          <th className="px-3 py-3 text-right">IGST (₹)</th>
+                          <th className="px-3 py-3 text-right">Total GST (₹)</th>
+                          <th className="px-3 py-3 text-right">Invoice (Debit ₹)</th>
+                          <th className="px-3 py-3 text-right">TDS (₹)</th>
+                          <th className="px-3 py-3 text-right">Bank / Cash (₹)</th>
+                          <th className="px-3 py-3 text-right">Settled (Credit ₹)</th>
+                          <th className="px-3 py-3 text-right">Running Balance (₹)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 bg-white font-mono text-[11px]">
+                        {filteredLedger.map((row, idx) => {
+                          const bal = Number(row.running_balance) || 0;
+                          return (
+                            <tr
+                              key={idx}
+                              className={`hover:bg-slate-50 transition-colors ${
+                                row.voucher_type === 'Opening' ? 'bg-slate-50/80 font-bold' : ''
+                              }`}
+                            >
+                              <td className="px-3 py-2.5 text-center font-sans text-slate-700">
+                                {row.entry_date}
+                              </td>
+                              <td className="px-3 py-2.5 text-center font-sans">
+                                <span
+                                  className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                    row.voucher_type === 'Sales Invoice'
+                                      ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                                      : row.voucher_type === 'Opening'
+                                      ? 'bg-slate-200 text-slate-700'
+                                      : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                  }`}
+                                >
+                                  {row.voucher_type}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2.5 text-center font-semibold text-slate-900">
+                                <div className="flex items-center justify-center gap-1.5">
+                                  <span>{row.voucher_no || '-'}</span>
+                                  {row.voucher_type === 'Sales Invoice' && Number(row.debit) > 0 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const params = new URLSearchParams({
+                                          customerCode: selectedClient.LedgerCode,
+                                          customerName: selectedClient.LedgerName,
+                                          docType: 'SALES_INVOICE',
+                                          docNo: row.voucher_no,
+                                          amount: String(row.debit || ''),
+                                        });
+                                        navigate(`/transaction/receipts/new?${params.toString()}`);
+                                      }}
+                                      className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800 transition-colors cursor-pointer text-[10px] font-bold border border-emerald-200"
+                                      title={`Record Receipt / Payment for ${row.voucher_no}`}
+                                    >
+                                      <CreditCard className="w-2.5 h-2.5" />
+                                      <span>Pay</span>
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="px-3 py-2.5 font-sans text-slate-600 max-w-xs truncate">
+                                {row.particulars}
+                              </td>
+                              <td className="px-3 py-2.5 text-right text-slate-700">
+                                {row.taxable_amt > 0 ? fmt(row.taxable_amt) : '-'}
+                              </td>
+                              <td className="px-3 py-2.5 text-right text-slate-500">
+                                {row.cgst_amt > 0 ? fmt(row.cgst_amt) : '-'}
+                              </td>
+                              <td className="px-3 py-2.5 text-right text-slate-500">
+                                {row.sgst_amt > 0 ? fmt(row.sgst_amt) : '-'}
+                              </td>
+                              <td className="px-3 py-2.5 text-right text-slate-500">
+                                {row.igst_amt > 0 ? fmt(row.igst_amt) : '-'}
+                              </td>
+                              <td className="px-3 py-2.5 text-right text-slate-700 font-semibold">
+                                {row.total_gst > 0 ? fmt(row.total_gst) : '-'}
+                              </td>
+                              <td className="px-3 py-2.5 text-right text-rose-700 font-bold">
+                                {row.debit > 0 ? fmt(row.debit) : '-'}
+                              </td>
+                              <td className="px-3 py-2.5 text-right text-amber-700 font-semibold">
+                                {row.tds_amt > 0 ? fmt(row.tds_amt) : '-'}
+                              </td>
+                              <td className="px-3 py-2.5 text-right text-emerald-700 font-semibold">
+                                {row.net_received > 0 ? fmt(row.net_received) : '-'}
+                              </td>
+                              <td className="px-3 py-2.5 text-right text-emerald-800 font-bold">
+                                {row.credit > 0 ? fmt(row.credit) : '-'}
+                              </td>
+                              <td className="px-3 py-2.5 text-right font-black text-slate-900">
+                                {fmt(Math.abs(bal))}
+                                <span className="text-[10px] ml-1 font-sans text-slate-500">
+                                  {bal >= 0 ? 'Dr' : 'Cr'}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                      {/* Table Summary Footer */}
+                      <tfoot className="bg-slate-100 text-slate-800 font-mono font-bold text-[11px] border-t-2 border-slate-300">
+                        <tr>
+                          <td colSpan={4} className="px-3 py-3 text-center font-sans font-bold">
+                            TOTALS &amp; CLOSING RUNNING BALANCE
+                          </td>
+                          <td className="px-3 py-3 text-right">{fmt(ledgerSummary.total_taxable)}</td>
+                          <td className="px-3 py-3 text-right">{fmt(ledgerSummary.total_cgst)}</td>
+                          <td className="px-3 py-3 text-right">{fmt(ledgerSummary.total_sgst)}</td>
+                          <td className="px-3 py-3 text-right">{fmt(ledgerSummary.total_igst)}</td>
+                          <td className="px-3 py-3 text-right">{fmt(ledgerSummary.total_gst)}</td>
+                          <td className="px-3 py-3 text-right text-rose-700 font-black">
+                            {fmt(ledgerSummary.total_debits)}
+                          </td>
+                          <td className="px-3 py-3 text-right text-amber-700">
+                            {fmt(ledgerSummary.total_tds)}
+                          </td>
+                          <td className="px-3 py-3 text-right text-emerald-700">
+                            {fmt(ledgerSummary.total_net_received)}
+                          </td>
+                          <td className="px-3 py-3 text-right text-emerald-800 font-black">
+                            {fmt(ledgerSummary.total_credits)}
+                          </td>
+                          <td className="px-3 py-3 text-right text-indigo-900 font-black text-xs">
+                            {fmt(Math.abs(ledgerSummary.closing_balance))}
+                            <span className="text-[10px] ml-1 font-sans text-slate-500">
+                              {ledgerSummary.closing_balance >= 0 ? 'Dr' : 'Cr'}
+                            </span>
+                          </td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* =================================================================== */}
+            {/* REPORT 2: EXECUTIVE SUMMARY (SETTLEMENT MATRIX & KPIS)              */}
+            {/* =================================================================== */}
+            {activeTab === 'summary' && (
+              <div className="p-4 lg:p-6 space-y-5">
+                {/* 5 KPI Snapshot Cards */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                  <div className="rounded-xl border border-blue-200 bg-blue-50/40 p-3.5">
+                    <span className="text-[11px] font-semibold text-blue-700 uppercase tracking-wider block">
+                      Total Invoiced / Billed
+                    </span>
+                    <span className="text-base font-black text-blue-900 font-mono mt-0.5 block">
+                      {fmt(kpis.total_invoiced_amount || 0)}
+                    </span>
+                    <span className="text-[10px] text-blue-600 mt-1 block">
+                      {kpis.total_sales_invoices_count || 0} Invoices Raised
+                    </span>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5">
+                    <span className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider block">
+                      Total GST Charged
+                    </span>
+                    <span className="text-base font-black text-slate-800 font-mono mt-0.5 block">
+                      {fmt(ledgerSummary.total_gst || 0)}
+                    </span>
+                    <span className="text-[10px] text-slate-500 mt-1 block">
+                      CGST + SGST + IGST
+                    </span>
+                  </div>
+
+                  <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-3.5">
+                    <span className="text-[11px] font-semibold text-amber-700 uppercase tracking-wider block">
+                      TDS Withheld by Client
+                    </span>
+                    <span className="text-base font-black text-amber-900 font-mono mt-0.5 block">
+                      {fmt(ledgerSummary.total_tds || 0)}
+                    </span>
+                    <span className="text-[10px] text-amber-600 mt-1 block">
+                      Tax credit in 26AS
+                    </span>
+                  </div>
+
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-3.5">
+                    <span className="text-[11px] font-semibold text-emerald-700 uppercase tracking-wider block">
+                      Net Cash / Bank Collected
+                    </span>
+                    <span className="text-base font-black text-emerald-900 font-mono mt-0.5 block">
+                      {fmt(kpis.total_collections || 0)}
+                    </span>
+                    <span className="text-[10px] text-emerald-600 mt-1 block">
+                      Direct cash/bank realization
+                    </span>
+                  </div>
+
+                  <div className="rounded-xl border border-rose-200 bg-rose-50/40 p-3.5">
+                    <span className="text-[11px] font-semibold text-rose-700 uppercase tracking-wider block">
+                      Net Outstanding Balance
+                    </span>
+                    <span className="text-base font-black text-rose-900 font-mono mt-0.5 block">
+                      {fmt(kpis.net_outstanding || 0)}
+                    </span>
+                    <span className="text-[10px] text-rose-600 mt-1 block">
+                      {invoicesSummary.pending_count || 0} unpaid invoices
+                    </span>
+                  </div>
+                </div>
+
+                {/* Filter and Matrix Header */}
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-2">
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                      <span>Sales Invoice Settlement Matrix (Invoice-by-Invoice)</span>
+                      <span className="text-xs font-normal text-slate-500">
+                        ({filteredInvoices.length} invoices)
+                      </span>
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Click on any invoice row to expand matched payment receipts and TDS details.
                     </p>
                   </div>
 
@@ -733,7 +1082,9 @@ export const CustomerReportPage = () => {
                     <button
                       onClick={() => setInvoiceFilter('ALL')}
                       className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
-                        invoiceFilter === 'ALL' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                        invoiceFilter === 'ALL'
+                          ? 'bg-white text-slate-900 shadow-2xs'
+                          : 'text-slate-600 hover:text-slate-900'
                       }`}
                     >
                       All ({invoicesBreakdown.length})
@@ -741,29 +1092,23 @@ export const CustomerReportPage = () => {
                     <button
                       onClick={() => setInvoiceFilter('PENDING')}
                       className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
-                        invoiceFilter === 'PENDING' ? 'bg-rose-600 text-white shadow-2xs' : 'text-slate-600 hover:text-rose-700'
+                        invoiceFilter === 'PENDING'
+                          ? 'bg-rose-600 text-white shadow-2xs'
+                          : 'text-slate-600 hover:text-rose-700'
                       }`}
                     >
-                      Due / Pending ({invoicesSummary.pending_count + invoicesSummary.partial_count || 0})
+                      Pending / Due ({invoicesSummary.pending_count + invoicesSummary.partial_count || 0})
                     </button>
                     <button
                       onClick={() => setInvoiceFilter('PAID')}
                       className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
-                        invoiceFilter === 'PAID' ? 'bg-emerald-600 text-white shadow-2xs' : 'text-slate-600 hover:text-emerald-700'
+                        invoiceFilter === 'PAID'
+                          ? 'bg-emerald-600 text-white shadow-2xs'
+                          : 'text-slate-600 hover:text-emerald-700'
                       }`}
                     >
-                      Paid ({invoicesSummary.paid_count || 0})
+                      Fully Paid ({invoicesSummary.paid_count || 0})
                     </button>
-                    {invoicesSummary.overdue_count > 0 && (
-                      <button
-                        onClick={() => setInvoiceFilter('OVERDUE')}
-                        className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
-                          invoiceFilter === 'OVERDUE' ? 'bg-rose-700 text-white shadow-2xs' : 'text-rose-600 hover:text-rose-800'
-                        }`}
-                      >
-                        Overdue ({invoicesSummary.overdue_count})
-                      </button>
-                    )}
                   </div>
                 </div>
 
@@ -776,138 +1121,194 @@ export const CustomerReportPage = () => {
                     <table className="min-w-full divide-y divide-slate-200 text-left text-xs">
                       <thead className="bg-slate-100 text-slate-700 font-bold uppercase tracking-wider text-[10px]">
                         <tr>
-                          <th className="px-3.5 py-3">#</th>
-                          <th className="px-3.5 py-3">Invoice Details</th>
-                          <th className="px-3.5 py-3">Order / Proforma Ref</th>
-                          <th className="px-3.5 py-3 text-right">Invoice Amount</th>
-                          <th className="px-3.5 py-3 text-right">Amount Received</th>
-                          <th className="px-3.5 py-3 text-right">Balance Due</th>
-                          <th className="px-3.5 py-3 text-center">Payment Status</th>
-                          <th className="px-3.5 py-3 text-center">Receipts / Details</th>
+                          <th className="px-3 py-3 text-center">#</th>
+                          <th className="px-3 py-3">Invoice No</th>
+                          <th className="px-3 py-3 text-center">Date</th>
+                          <th className="px-3 py-3 text-center">FY</th>
+                          <th className="px-3 py-3 text-right">Taxable (₹)</th>
+                          <th className="px-3 py-3 text-right">GST (₹)</th>
+                          <th className="px-3 py-3 text-right">Total Invoice (₹)</th>
+                          <th className="px-3 py-3 text-right">Cash / Bank (₹)</th>
+                          <th className="px-3 py-3 text-right">TDS (₹)</th>
+                          <th className="px-3 py-3 text-right">Total Settled (₹)</th>
+                          <th className="px-3 py-3 text-right">Balance Due (₹)</th>
+                          <th className="px-3 py-3 text-center">Status</th>
+                          <th className="px-3 py-3 text-center">Action / Pay</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-100 bg-white">
+                      <tbody className="divide-y divide-slate-100 bg-white font-mono text-[11px]">
                         {filteredInvoices.map((inv, idx) => {
                           const isExpanded = expandedInvoiceIdx === idx;
+                          const matched = inv.matched_receipts || [];
+                          const inv_tds = matched.reduce(
+                            (acc, m) => acc + (Number(m.tds_amount) || 0),
+                            0
+                          );
+                          const settled = Number(inv.amount_paid) || 0;
+                          const inv_cash = Math.max(0, settled - inv_tds);
+                          const due = Number(inv.balance_due) || 0;
+                          const status = inv.payment_status_label || 'Pending';
+
                           return (
                             <React.Fragment key={idx}>
-                              <tr className="hover:bg-slate-50 transition-colors">
-                                <td className="px-3.5 py-3 font-mono text-slate-400">{idx + 1}</td>
-                                <td className="px-3.5 py-3">
-                                  <div className="font-bold text-slate-900 font-mono text-xs">
-                                    {inv.TransNo || inv.InvoiceNo}
-                                  </div>
-                                  <div className="text-[11px] text-slate-500 flex items-center gap-1.5 mt-0.5">
-                                    <Calendar className="w-3 h-3 text-slate-400" />
-                                    <span>{inv.InvoiceDate || inv.TransDate || '-'}</span>
-                                  </div>
+                              <tr
+                                onClick={() =>
+                                  setExpandedInvoiceIdx(isExpanded ? null : idx)
+                                }
+                                className="hover:bg-indigo-50/40 transition-colors cursor-pointer"
+                              >
+                                <td className="px-3 py-2.5 text-center font-sans text-slate-400">
+                                  {idx + 1}
                                 </td>
-                                <td className="px-3.5 py-3 font-medium text-slate-700">
-                                  {inv.InvoiceNo || '-'}
-                                </td>
-                                <td className="px-3.5 py-3 text-right font-mono font-bold text-slate-900">
-                                  {fmt(inv.net_amount_float)}
-                                </td>
-                                <td className="px-3.5 py-3 text-right font-mono font-bold text-emerald-700">
-                                  {fmt(inv.amount_paid)}
-                                </td>
-                                <td className="px-3.5 py-3 text-right font-mono font-bold">
-                                  <span className={inv.balance_due > 0 ? 'text-rose-600' : 'text-slate-400'}>
-                                    {fmt(inv.balance_due)}
-                                  </span>
-                                </td>
-                                <td className="px-3.5 py-3 text-center">
-                                  {inv.payment_status === 'PAID' || Number(inv.balance_due) <= 0.01 ? (
-                                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                      <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                                      <span>PAID</span>
-                                    </span>
-                                  ) : inv.payment_status === 'PARTIAL' || (Number(inv.amount_paid) > 0 && Number(inv.balance_due) > 0.01) ? (
-                                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
-                                      <Clock className="w-3 h-3 text-amber-600" />
-                                      <span>PARTIAL</span>
-                                    </span>
-                                  ) : inv.payment_status === 'PENDING_APPROVAL' ? (
-                                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
-                                      <Clock className="w-3 h-3 text-blue-600" />
-                                      <span>PENDING APPROVAL</span>
-                                    </span>
-                                  ) : (
-                                    <div className="inline-flex flex-col items-center gap-0.5">
-                                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
-                                        <AlertCircle className="w-3 h-3 text-rose-600" />
-                                        <span>UNPAID</span>
+                                <td className="px-3 py-2.5 font-bold text-slate-900">
+                                  <div className="flex items-center gap-1.5">
+                                    <span>{inv.InvoiceNo || inv.TransNo}</span>
+                                    {matched.length > 0 && (
+                                      <span className="text-[10px] text-slate-400 font-sans">
+                                        ({matched.length} rcpts)
                                       </span>
-                                      {inv.is_overdue && (
-                                        <span className="text-[9px] font-bold text-rose-600">
-                                          Overdue by {inv.days_overdue}d
-                                        </span>
-                                      )}
-                                    </div>
+                                    )}
+                                    {isExpanded ? (
+                                      <ChevronUp className="w-3.5 h-3.5 text-indigo-600" />
+                                    ) : (
+                                      <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="px-3 py-2.5 text-center font-sans text-slate-600">
+                                  {String(inv.InvoiceDate || '').slice(0, 10)}
+                                </td>
+                                <td className="px-3 py-2.5 text-center font-sans text-slate-500">
+                                  {(inv.fin_year || inv.FinYearVal || '-').replace('_', '-')}
+                                </td>
+                                <td className="px-3 py-2.5 text-right text-slate-700">
+                                  {inv.TotalItemAmount > 0 ? fmt(inv.TotalItemAmount) : '-'}
+                                </td>
+                                <td className="px-3 py-2.5 text-right text-slate-600">
+                                  {fmt(
+                                    (Number(inv.TotalCGSTAmount) || 0) +
+                                      (Number(inv.TotalSGSTAmount) || 0) +
+                                      (Number(inv.TotalIGSTAmount) || 0)
                                   )}
                                 </td>
-                                <td className="px-3.5 py-3 text-center">
+                                <td className="px-3 py-2.5 text-right text-slate-900 font-bold">
+                                  {fmt(inv.net_amount_float || inv.NetAmount)}
+                                </td>
+                                <td className="px-3 py-2.5 text-right text-emerald-700">
+                                  {inv_cash > 0 ? fmt(inv_cash) : '-'}
+                                </td>
+                                <td className="px-3 py-2.5 text-right text-amber-700">
+                                  {inv_tds > 0 ? fmt(inv_tds) : '-'}
+                                </td>
+                                <td className="px-3 py-2.5 text-right text-emerald-800 font-bold">
+                                  {settled > 0 ? fmt(settled) : '-'}
+                                </td>
+                                <td className="px-3 py-2.5 text-right font-black text-rose-700">
+                                  {due > 0 ? fmt(due) : '-'}
+                                </td>
+                                <td className="px-3 py-2.5 text-center font-sans">
+                                  <span
+                                    className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                      status.toLowerCase() === 'paid'
+                                        ? 'bg-emerald-100 text-emerald-800'
+                                        : status.toLowerCase() === 'partially paid'
+                                        ? 'bg-amber-100 text-amber-800'
+                                        : 'bg-rose-100 text-rose-800'
+                                    }`}
+                                  >
+                                    {status}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2.5 text-center font-sans">
                                   <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                                    {inv.balance_due > 0 && (
+                                    {Number(due) > 0.01 && (
                                       <button
                                         type="button"
-                                        onClick={() => {
+                                        onClick={(e) => {
+                                          e.stopPropagation();
                                           const params = new URLSearchParams({
                                             customerCode: selectedClient.LedgerCode,
                                             customerName: selectedClient.LedgerName,
                                             docType: 'SALES_INVOICE',
-                                            docNo: inv.TransNo || inv.InvoiceNo,
-                                            amount: String(inv.balance_due || inv.net_amount_float || ''),
+                                            docNo: inv.InvoiceNo || inv.TransNo,
+                                            amount: String(due || inv.net_amount_float || ''),
                                           });
                                           navigate(`/transaction/receipts/new?${params.toString()}`);
                                         }}
-                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white transition-colors cursor-pointer shadow-2xs"
-                                        title="Record Payment for this Invoice"
+                                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white transition-colors cursor-pointer shadow-2xs"
+                                        title="Record Payment for this invoice"
                                       >
-                                        <CreditCard className="w-2.5 h-2.5" />
+                                        <CreditCard className="w-3 h-3" />
                                         <span>Pay</span>
                                       </button>
                                     )}
-
-                                    {inv.matched_receipts && inv.matched_receipts.length > 0 ? (
+                                    {matched.length > 0 ? (
                                       <button
                                         type="button"
-                                        onClick={() => setExpandedInvoiceIdx(isExpanded ? null : idx)}
-                                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold border border-slate-200 hover:bg-slate-100 text-slate-700 cursor-pointer"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setExpandedInvoiceIdx(isExpanded ? null : idx);
+                                        }}
+                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold border border-slate-200 hover:bg-slate-100 text-slate-700 cursor-pointer"
+                                        title="View matched receipts"
                                       >
-                                        <span>{inv.matched_receipts.length} Receipt(s)</span>
+                                        <span>{matched.length} Rcpt</span>
                                         {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                                       </button>
                                     ) : (
-                                      inv.balance_due <= 0 && <span className="text-[10px] text-slate-400">No Receipts</span>
+                                      Number(due) <= 0.01 && (
+                                        <span className="text-[10px] text-emerald-600 font-semibold flex items-center gap-0.5">
+                                          <CheckCircle2 className="w-3 h-3" />
+                                          <span>Settled</span>
+                                        </span>
+                                      )
                                     )}
                                   </div>
                                 </td>
                               </tr>
 
-                              {/* Expanded matched receipts row */}
-                              {isExpanded && inv.matched_receipts && (
-                                <tr className="bg-slate-50/90">
-                                  <td colSpan={8} className="p-3">
-                                    <div className="bg-white rounded-lg border border-slate-200 p-3 space-y-2">
-                                      <div className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                                        <DollarSign className="w-3.5 h-3.5 text-emerald-600" />
-                                        <span>Payment Receipts Clearing Invoice {inv.TransNo}:</span>
-                                      </div>
-                                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 text-xs">
-                                        {inv.matched_receipts.map((mr, rIdx) => (
-                                          <div key={rIdx} className="rounded-lg border border-emerald-100 bg-emerald-50/40 p-2.5">
-                                            <div className="flex justify-between font-bold text-slate-900 font-mono">
-                                              <span>Voucher #{mr.voucher_no}</span>
-                                              <span className="text-emerald-700">{fmt(mr.allocated_amount)}</span>
+                              {/* Expanded Row: Matched Payment Receipts */}
+                              {isExpanded && (
+                                <tr className="bg-slate-50/90 font-sans">
+                                  <td colSpan={13} className="px-6 py-3 border-y border-indigo-100">
+                                    <div className="space-y-1.5">
+                                      <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block">
+                                        Matched Payments &amp; Receipts for {inv.InvoiceNo || inv.TransNo}:
+                                      </span>
+                                      {matched.length === 0 ? (
+                                        <div className="text-xs text-slate-500 italic">
+                                          No receipts have been allocated to this invoice yet.
+                                        </div>
+                                      ) : (
+                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 mt-1">
+                                          {matched.map((r, mIdx) => (
+                                            <div
+                                              key={mIdx}
+                                              className="p-2.5 rounded-lg bg-white border border-slate-200 text-xs shadow-2xs"
+                                            >
+                                              <div className="flex items-center justify-between font-bold text-slate-800">
+                                                <span>Receipt #{r.receipt_no}</span>
+                                                <span className="font-mono text-emerald-700">
+                                                  {fmt(r.amount_allocated)}
+                                                </span>
+                                              </div>
+                                              <div className="text-[11px] text-slate-500 mt-1 flex items-center justify-between">
+                                                <span>Date: {r.receipt_date || '-'}</span>
+                                                {Number(r.tds_amount) > 0 && (
+                                                  <span className="text-amber-700 font-semibold font-mono">
+                                                    TDS: {fmt(r.tds_amount)}
+                                                  </span>
+                                                )}
+                                              </div>
+                                              {r.narration && (
+                                                <div className="text-[10px] text-slate-400 mt-0.5 truncate">
+                                                  {r.narration}
+                                                </div>
+                                              )}
                                             </div>
-                                            <div className="text-[10px] text-slate-500 mt-1 flex justify-between">
-                                              <span>Date: {mr.voucher_date}</span>
-                                              <span className="italic">{mr.type}</span>
-                                            </div>
-                                          </div>
-                                        ))}
-                                      </div>
+                                          ))}
+                                        </div>
+                                      )}
                                     </div>
                                   </td>
                                 </tr>
@@ -916,795 +1317,95 @@ export const CustomerReportPage = () => {
                           );
                         })}
                       </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* TAB 1: PERCENTAGE MILESTONES & ADVANCE TRACKER */}
-            {activeTab === 'milestones' && (
-              <div className="p-4 lg:p-6 space-y-5">
-                {/* Summary banner */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5">
-                    <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
-                      Total Proforma Value
-                    </span>
-                    <span className="text-base font-black text-slate-900 font-mono mt-0.5 block">
-                      {fmt(milestonesSummary.total_order_value)}
-                    </span>
-                    <span className="text-[10px] text-slate-400 mt-1 block">
-                      {milestones.length} Proforma Invoices Issued
-                    </span>
-                  </div>
-
-                  <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-3.5">
-                    <span className="text-[11px] font-semibold text-emerald-700 uppercase tracking-wider block">
-                      Advance Collected
-                    </span>
-                    <span className="text-base font-black text-emerald-800 font-mono mt-0.5 block">
-                      {fmt(milestonesSummary.total_collected)}
-                    </span>
-                    <span className="text-[10px] text-emerald-600 mt-1 block">
-                      {milestonesSummary.cleared_count} Fully Cleared • {milestonesSummary.partial_count} Partial
-                    </span>
-                  </div>
-
-                  <div className="rounded-xl border border-rose-200 bg-rose-50/50 p-3.5">
-                    <span className="text-[11px] font-semibold text-rose-700 uppercase tracking-wider block">
-                      Balance Pending
-                    </span>
-                    <span className="text-base font-black text-rose-800 font-mono mt-0.5 block">
-                      {fmt(milestonesSummary.total_pending)}
-                    </span>
-                    <span className="text-[10px] text-rose-600 mt-1 block">
-                      {milestonesSummary.pending_count} Milestones Pending Advance
-                    </span>
-                  </div>
-
-                  <div className="rounded-xl border border-indigo-200 bg-indigo-50/50 p-3.5">
-                    <span className="text-[11px] font-semibold text-indigo-700 uppercase tracking-wider block">
-                      Sales Invoice Converted
-                    </span>
-                    <span className="text-base font-black text-indigo-800 font-mono mt-0.5 block">
-                      {milestonesSummary.invoiced_count} / {milestones.length}
-                    </span>
-                    <span className="text-[10px] text-indigo-600 mt-1 block">
-                      {milestones.length - milestonesSummary.invoiced_count > 0
-                        ? `${milestones.length - milestonesSummary.invoiced_count} Pending Invoicing`
-                        : 'All Converted to Invoices'}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Filter and Table Header */}
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-2">
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                      <span>Proforma Invoices & Advance Payment Matching</span>
-                      <span className="text-xs font-normal text-slate-500">
-                        ({filteredMilestones.length} showing)
-                      </span>
-                    </h3>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      Tracks agreed advance collections against actual receipts and links to final sales invoices.
-                    </p>
-                  </div>
-
-                  {/* Filter Pills */}
-                  <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-lg text-xs font-semibold">
-                    <button
-                      onClick={() => setMilestoneFilter('ALL')}
-                      className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
-                        milestoneFilter === 'ALL' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
-                      }`}
-                    >
-                      All ({milestones.length})
-                    </button>
-                    <button
-                      onClick={() => setMilestoneFilter('CLEARED')}
-                      className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
-                        milestoneFilter === 'CLEARED' ? 'bg-emerald-600 text-white shadow-2xs' : 'text-slate-600 hover:text-emerald-700'
-                      }`}
-                    >
-                      Fully Cleared ({milestonesSummary.cleared_count})
-                    </button>
-                    <button
-                      onClick={() => setMilestoneFilter('PARTIAL')}
-                      className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
-                        milestoneFilter === 'PARTIAL' ? 'bg-amber-600 text-white shadow-2xs' : 'text-slate-600 hover:text-amber-700'
-                      }`}
-                    >
-                      Partial ({milestonesSummary.partial_count})
-                    </button>
-                    <button
-                      onClick={() => setMilestoneFilter('PENDING')}
-                      className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
-                        milestoneFilter === 'PENDING' ? 'bg-rose-600 text-white shadow-2xs' : 'text-slate-600 hover:text-rose-700'
-                      }`}
-                    >
-                      Pending ({milestonesSummary.pending_count})
-                    </button>
-                  </div>
-                </div>
-
-                {filteredMilestones.length === 0 ? (
-                  <div className="text-center py-12 text-xs text-slate-500 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-                    No Proforma Invoices or Advance Milestones match the selected filter in {selectedFinYear}.
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto rounded-xl border border-slate-200">
-                    <table className="min-w-full divide-y divide-slate-200 text-left text-xs">
-                      <thead className="bg-slate-100 text-slate-700 font-bold uppercase tracking-wider text-[10px]">
+                      {/* Table Summary Footer */}
+                      <tfoot className="bg-slate-100 text-slate-800 font-mono font-bold text-[11px] border-t-2 border-slate-300">
                         <tr>
-                          <th className="px-3.5 py-3">Proforma / Quote Ref</th>
-                          <th className="px-3.5 py-3 text-right">Order Total</th>
-                          <th className="px-3.5 py-3 text-right">Advance Received</th>
-                          <th className="px-3.5 py-3 w-48 text-center">% Progress</th>
-                          <th className="px-3.5 py-3">Sales Invoice Status</th>
-                          <th className="px-3.5 py-3 text-center">Milestone Status</th>
-                          <th className="px-3.5 py-3 text-right">Balance Due</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 bg-white">
-                        {filteredMilestones.map((m, idx) => {
-                          const pct = m.advance_percentage_achieved || 0;
-                          const isFullyCleared = pct >= 100 || (m.balance_pending <= 0.01 && m.total_order_value > 0);
-
-                          return (
-                            <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                              <td className="px-3.5 py-3">
-                                <div className="font-bold text-slate-900 font-mono">{m.proforma_no}</div>
-                                <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1">
-                                  <Calendar className="w-3 h-3 text-slate-400" />
-                                  <span>{m.proforma_date} &bull; Quote: {m.quotation_no || '-'}</span>
-                                </div>
-                              </td>
-                              <td className="px-3.5 py-3 text-right font-mono font-bold text-slate-900">
-                                {fmt(m.total_order_value)}
-                              </td>
-                              <td className="px-3.5 py-3 text-right">
-                                <div className="font-bold font-mono text-emerald-700">
-                                  {fmt(m.advance_collected)}
-                                </div>
-                                <div className="text-[10px] text-slate-400">from Payment Receipts</div>
-                              </td>
-                              <td className="px-3.5 py-3">
-                                <div className="space-y-1">
-                                  <div className="flex items-center justify-between text-[10px] font-bold">
-                                    <span
-                                      className={
-                                        isFullyCleared
-                                          ? 'text-emerald-700 font-extrabold'
-                                          : pct > 0
-                                          ? 'text-indigo-700'
-                                          : 'text-slate-500'
-                                      }
-                                    >
-                                      {pct}% Paid
-                                    </span>
-                                    {isFullyCleared ? (
-                                      <span className="text-emerald-600 text-[10px] font-semibold flex items-center gap-0.5">
-                                        <CheckCircle2 className="w-3 h-3" /> Fully Cleared
-                                      </span>
-                                    ) : pct > 0 ? (
-                                      <span className="text-amber-600 text-[10px] font-semibold">Partial</span>
-                                    ) : (
-                                      <span className="text-slate-400 text-[10px]">Unpaid</span>
-                                    )}
-                                  </div>
-                                  <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden border border-slate-200">
-                                    <div
-                                      className={`h-full rounded-full transition-all duration-500 ${
-                                        isFullyCleared
-                                          ? 'bg-emerald-500'
-                                          : pct > 0
-                                          ? 'bg-indigo-600'
-                                          : 'bg-transparent'
-                                      }`}
-                                      style={{ width: `${Math.min(pct, 100)}%` }}
-                                    />
-                                  </div>
-                                </div>
-                              </td>
-                              <td className="px-3.5 py-3">
-                                {m.sales_invoice_no ? (
-                                  <div>
-                                    <span className="font-semibold text-indigo-700 font-mono flex items-center gap-1">
-                                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                                      {m.sales_invoice_no}
-                                    </span>
-                                    <div className="text-[10px] text-slate-500">
-                                      Inv Date: {m.sales_invoice_date || '-'}
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <span className="text-amber-700 bg-amber-50 border border-amber-200 text-[10px] font-semibold px-2 py-0.5 rounded">
-                                    Sales Inv Pending
-                                  </span>
-                                )}
-                              </td>
-                              <td className="px-3.5 py-3 text-center">
-                                <span
-                                  className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold border ${
-                                    isFullyCleared || (m.status && (m.status.toLowerCase().includes('fully') || m.status.toLowerCase().includes('completed')))
-                                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                      : pct > 0
-                                      ? 'bg-amber-50 text-amber-700 border-amber-200'
-                                      : 'bg-slate-100 text-slate-600 border-slate-200'
-                                  }`}
-                                >
-                                  {m.status}
-                                </span>
-                              </td>
-                              <td className="px-3.5 py-3 text-right">
-                                <div className="font-bold font-mono text-rose-600">{fmt(m.balance_pending)}</div>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* TAB 2: DOCUMENT LIFECYCLE TIMELINE */}
-            {activeTab === 'timeline' && (
-              <div className="p-4 lg:p-6 space-y-5">
-                {/* Header and Filter Pills */}
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                      <span>Chronological Transaction Flow</span>
-                      <span className="text-xs font-normal text-slate-500">
-                        ({filteredTimeline.length} showing)
-                      </span>
-                    </h3>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      Complete trace of Quotations, Proformas, Sales Invoices, and Payment Receipts.
-                    </p>
-                  </div>
-
-                  {/* Filter Pills */}
-                  <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-lg text-xs font-semibold flex-wrap">
-                    <button
-                      onClick={() => setTimelineFilter('ALL')}
-                      className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
-                        timelineFilter === 'ALL' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
-                      }`}
-                    >
-                      All ({timeline.length})
-                    </button>
-                    <button
-                      onClick={() => setTimelineFilter('Quotation')}
-                      className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
-                        timelineFilter === 'Quotation' ? 'bg-indigo-600 text-white shadow-2xs' : 'text-slate-600 hover:text-indigo-700'
-                      }`}
-                    >
-                      Quotations ({timelineSummary.quote_count})
-                    </button>
-                    <button
-                      onClick={() => setTimelineFilter('Proforma')}
-                      className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
-                        timelineFilter === 'Proforma' ? 'bg-amber-600 text-white shadow-2xs' : 'text-slate-600 hover:text-amber-700'
-                      }`}
-                    >
-                      Proformas ({timelineSummary.pi_count})
-                    </button>
-                    <button
-                      onClick={() => setTimelineFilter('Invoice')}
-                      className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
-                        timelineFilter === 'Invoice' ? 'bg-blue-600 text-white shadow-2xs' : 'text-slate-600 hover:text-blue-700'
-                      }`}
-                    >
-                      Invoices ({timelineSummary.inv_count})
-                    </button>
-                    <button
-                      onClick={() => setTimelineFilter('Receipt')}
-                      className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
-                        timelineFilter === 'Receipt' ? 'bg-emerald-600 text-white shadow-2xs' : 'text-slate-600 hover:text-emerald-700'
-                      }`}
-                    >
-                      Receipts ({timelineSummary.receipt_count})
-                    </button>
-                  </div>
-                </div>
-
-                {filteredTimeline.length === 0 ? (
-                  <div className="text-center py-12 text-xs text-slate-500 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-                    No transactions match the selected filter in {selectedFinYear}.
-                  </div>
-                ) : (
-                  <div className="relative pl-6 space-y-6 before:content-[''] before:absolute before:left-2.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
-                    {filteredTimeline.map((item, idx) => {
-                      const isQuote = item.doc_type === 'Quotation';
-                      const isPI = item.doc_type === 'Proforma Invoice';
-                      const isInvoice = item.doc_type === 'Sales Invoice';
-                      const isTally = item.doc_type.startsWith('Tally');
-
-                      return (
-                        <div key={idx} className="relative group">
-                          {/* Timeline dot */}
-                          <div
-                            className={`absolute -left-6 top-1.5 w-3.5 h-3.5 rounded-full border-2 border-white shadow-xs ${
-                              isQuote
-                                ? 'bg-indigo-600'
-                                : isPI
-                                ? 'bg-amber-500'
-                                : isInvoice
-                                ? 'bg-blue-600'
-                                : 'bg-emerald-600'
-                            }`}
-                          />
-
-                          <div className="bg-slate-50 hover:bg-indigo-50/40 transition-colors p-4 rounded-xl border border-slate-200/80">
-                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                              <div className="flex items-center gap-2">
-                                <span
-                                  className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider ${
-                                    isQuote
-                                      ? 'bg-indigo-100 text-indigo-800'
-                                      : isPI
-                                      ? 'bg-amber-100 text-amber-800'
-                                      : isInvoice
-                                      ? 'bg-blue-100 text-blue-800'
-                                      : 'bg-emerald-100 text-emerald-800'
-                                  }`}
-                                >
-                                  {item.doc_type}
-                                </span>
-                                <span className="font-bold text-sm text-slate-900 font-mono">
-                                  {item.doc_no}
-                                </span>
-                                <span className="text-xs text-slate-400">&bull; {item.doc_date}</span>
-                              </div>
-
-                              <div className="font-black text-sm text-slate-900 font-mono">
-                                {fmt(item.amount)}
-                              </div>
-                            </div>
-
-                            {(item.reference || item.remarks || item.terms) && (
-                              <div className="mt-2 text-xs text-slate-600 space-y-1">
-                                {item.reference && (
-                                  <div>
-                                    <span className="font-semibold text-slate-500">Ref:</span> {item.reference}
-                                  </div>
-                                )}
-                                {item.remarks && (
-                                  <div>
-                                    <span className="font-semibold text-slate-500">Remarks:</span> {item.remarks}
-                                  </div>
-                                )}
-                                {item.terms && (
-                                  <div className="text-[11px] text-slate-500 italic bg-white p-2 rounded border border-slate-100 mt-1 whitespace-pre-line">
-                                    {item.terms}
-                                  </div>
-                                )}
-                              </div>
+                          <td colSpan={4} className="px-3 py-3 text-center font-sans font-bold">
+                            PORTFOLIO TOTALS
+                          </td>
+                          <td className="px-3 py-3 text-right">
+                            {fmt(
+                              filteredInvoices.reduce(
+                                (acc, i) => acc + (Number(i.TotalItemAmount) || 0),
+                                0
+                              )
                             )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* TAB 3: STATEMENT OF ACCOUNT (RUNNING LEDGER) */}
-            {activeTab === 'ledger' && (
-              <div className="p-4 lg:p-6 space-y-5">
-                {/* Summary banner */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5">
-                    <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
-                      Opening Balance
-                    </span>
-                    <span className="text-base font-black text-slate-900 font-mono mt-0.5 block">
-                      {fmt(Math.abs(ledgerSummary.op_balance))}
-                    </span>
-                    <span className="text-[10px] text-slate-400 mt-1 block">
-                      {ledgerSummary.op_balance > 0 ? 'Debit (Due from Customer)' : ledgerSummary.op_balance < 0 ? 'Credit (Advance)' : 'Nil Opening'}
-                    </span>
-                  </div>
-
-                  <div className="rounded-xl border border-rose-200 bg-rose-50/50 p-3.5">
-                    <span className="text-[11px] font-semibold text-rose-700 uppercase tracking-wider block">
-                      Total Debits (Billed)
-                    </span>
-                    <span className="text-base font-black text-rose-800 font-mono mt-0.5 block">
-                      {fmt(ledgerSummary.total_debits)}
-                    </span>
-                    <span className="text-[10px] text-rose-600 mt-1 block">
-                      {ledgerSummary.debit_count} Sales Invoices & Charges
-                    </span>
-                  </div>
-
-                  <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-3.5">
-                    <span className="text-[11px] font-semibold text-emerald-700 uppercase tracking-wider block">
-                      Total Credits (Received)
-                    </span>
-                    <span className="text-base font-black text-emerald-800 font-mono mt-0.5 block">
-                      {fmt(ledgerSummary.total_credits)}
-                    </span>
-                    <span className="text-[10px] text-emerald-600 mt-1 block">
-                      {ledgerSummary.credit_count} Receipts & Payments
-                    </span>
-                  </div>
-
-                  <div className="rounded-xl border border-indigo-200 bg-indigo-50/50 p-3.5">
-                    <span className="text-[11px] font-semibold text-indigo-700 uppercase tracking-wider block">
-                      Net Closing Balance
-                    </span>
-                    <span className="text-base font-black text-indigo-800 font-mono mt-0.5 block">
-                      {fmt(Math.abs(ledgerSummary.closing_balance))}
-                      <span className="text-xs font-bold ml-1 text-indigo-600">
-                        {ledgerSummary.closing_balance > 0 ? 'Dr (Due)' : ledgerSummary.closing_balance < 0 ? 'Cr (Advance)' : 'Nil'}
-                      </span>
-                    </span>
-                    <span className="text-[10px] text-indigo-600 mt-1 block">
-                      {ledgerSummary.closing_balance > 0 ? 'Outstanding amount receivable' : 'Account in credit / settled'}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Filter and Action Header */}
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-2">
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                      <span>Statement of Account / Running Ledger Balance</span>
-                      <span className="text-xs font-normal text-slate-500">
-                        ({filteredLedger.length} showing)
-                      </span>
-                    </h3>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      Debits represent billed Sales Invoices; Credits represent bank deposits, customer payments, and advances.
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-2 flex-wrap">
-                    {/* Filter Pills */}
-                    <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-lg text-xs font-semibold">
-                      <button
-                        onClick={() => setLedgerFilter('ALL')}
-                        className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
-                          ledgerFilter === 'ALL' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
-                        }`}
-                      >
-                        All ({runningLedger.length})
-                      </button>
-                      <button
-                        onClick={() => setLedgerFilter('DEBIT')}
-                        className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
-                          ledgerFilter === 'DEBIT' ? 'bg-rose-600 text-white shadow-2xs' : 'text-slate-600 hover:text-rose-700'
-                        }`}
-                      >
-                        Debits ({ledgerSummary.debit_count})
-                      </button>
-                      <button
-                        onClick={() => setLedgerFilter('CREDIT')}
-                        className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
-                          ledgerFilter === 'CREDIT' ? 'bg-emerald-600 text-white shadow-2xs' : 'text-slate-600 hover:text-emerald-700'
-                        }`}
-                      >
-                        Credits ({ledgerSummary.credit_count})
-                      </button>
-                    </div>
-
-                    {/* Download Ledger Button */}
-                    <button
-                      onClick={() => handleExportExcel('ledger')}
-                      disabled={downloadExcelMutation.isPending}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-all shadow-2xs cursor-pointer disabled:opacity-50"
-                    >
-                      {downloadExcelMutation.isPending ? (
-                        <div className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                      ) : (
-                        <Download className="w-3.5 h-3.5" />
-                      )}
-                      <span>{downloadExcelMutation.isPending ? 'Generating...' : 'Download Ledger (.xlsx)'}</span>
-                    </button>
-                  </div>
-                </div>
-
-                {filteredLedger.length === 0 ? (
-                  <div className="text-center py-12 text-xs text-slate-500 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-                    No ledger entries match the selected filter in {selectedFinYear}.
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto rounded-xl border border-slate-200">
-                    <table className="min-w-full divide-y divide-slate-200 text-left text-xs">
-                      <thead className="bg-slate-100 text-slate-700 font-bold uppercase tracking-wider text-[10px]">
-                        <tr>
-                          <th className="px-3.5 py-3">Date</th>
-                          <th className="px-3.5 py-3">Voucher Type</th>
-                          <th className="px-3.5 py-3">Reference No</th>
-                          <th className="px-3.5 py-3">Particulars / Narration</th>
-                          <th className="px-3.5 py-3 text-right">Debit (₹)</th>
-                          <th className="px-3.5 py-3 text-right">Credit (₹)</th>
-                          <th className="px-3.5 py-3 text-right">Running Balance (₹)</th>
+                          </td>
+                          <td className="px-3 py-3 text-right">
+                            {fmt(
+                              filteredInvoices.reduce(
+                                (acc, i) =>
+                                  acc +
+                                  (Number(i.TotalCGSTAmount) || 0) +
+                                  (Number(i.TotalSGSTAmount) || 0) +
+                                  (Number(i.TotalIGSTAmount) || 0),
+                                0
+                              )
+                            )}
+                          </td>
+                          <td className="px-3 py-3 text-right font-black text-slate-900">
+                            {fmt(
+                              filteredInvoices.reduce(
+                                (acc, i) =>
+                                  acc + (Number(i.net_amount_float || i.NetAmount) || 0),
+                                0
+                              )
+                            )}
+                          </td>
+                          <td className="px-3 py-3 text-right text-emerald-700">
+                            {fmt(
+                              filteredInvoices.reduce((acc, i) => {
+                                const m = i.matched_receipts || [];
+                                const tds = m.reduce(
+                                  (a, r) => a + (Number(r.tds_amount) || 0),
+                                  0
+                                );
+                                const pd = Number(i.amount_paid) || 0;
+                                return acc + Math.max(0, pd - tds);
+                              }, 0)
+                            )}
+                          </td>
+                          <td className="px-3 py-3 text-right text-amber-700">
+                            {fmt(
+                              filteredInvoices.reduce((acc, i) => {
+                                const m = i.matched_receipts || [];
+                                return (
+                                  acc +
+                                  m.reduce((a, r) => a + (Number(r.tds_amount) || 0), 0)
+                                );
+                              }, 0)
+                            )}
+                          </td>
+                          <td className="px-3 py-3 text-right text-emerald-800 font-black">
+                            {fmt(
+                              filteredInvoices.reduce(
+                                (acc, i) => acc + (Number(i.amount_paid) || 0),
+                                0
+                              )
+                            )}
+                          </td>
+                          <td className="px-3 py-3 text-right text-rose-700 font-black">
+                            {fmt(
+                              filteredInvoices.reduce(
+                                (acc, i) => acc + (Number(i.balance_due) || 0),
+                                0
+                              )
+                            )}
+                          </td>
+                          <td className="px-3 py-3"></td>
+                          <td className="px-3 py-3"></td>
                         </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 bg-white font-mono">
-                        {filteredLedger.map((row, idx) => (
-                          <tr
-                            key={idx}
-                            className={`hover:bg-slate-50 transition-colors ${
-                              row.voucher_type === 'Opening' ? 'bg-slate-50 font-bold' : ''
-                            }`}
-                          >
-                            <td className="px-3.5 py-3 font-sans text-slate-700">{row.entry_date}</td>
-                            <td className="px-3.5 py-3 font-sans">
-                              <span
-                                className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
-                                  row.voucher_type === 'Sales Invoice'
-                                    ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                                    : row.voucher_type === 'Opening'
-                                    ? 'bg-slate-200 text-slate-700'
-                                    : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                }`}
-                              >
-                                {row.voucher_type}
-                              </span>
-                            </td>
-                            <td className="px-3.5 py-3 font-semibold text-slate-800">{row.voucher_no}</td>
-                            <td className="px-3.5 py-3 font-sans text-slate-600 max-w-xs truncate">
-                              {row.particulars}
-                            </td>
-                            <td className="px-3.5 py-3 text-right text-rose-700 font-semibold">
-                              {row.debit > 0 ? fmt(row.debit) : '-'}
-                            </td>
-                            <td className="px-3.5 py-3 text-right text-emerald-700 font-semibold">
-                              {row.credit > 0 ? fmt(row.credit) : '-'}
-                            </td>
-                            <td
-                              className={`px-3.5 py-3 text-right font-black ${
-                                row.running_balance > 0
-                                  ? 'text-rose-600'
-                                  : row.running_balance < 0
-                                  ? 'text-emerald-600'
-                                  : 'text-slate-800'
-                              }`}
-                            >
-                              {fmt(Math.abs(row.running_balance))}
-                              <span className="text-[10px] font-normal ml-1">
-                                {row.running_balance > 0 ? 'Dr' : row.running_balance < 0 ? 'Cr' : ''}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
+                      </tfoot>
                     </table>
                   </div>
                 )}
-              </div>
-            )}
-
-            {/* TAB 4: RAW DOCUMENTS OVERVIEW */}
-            {activeTab === 'raw_docs' && (
-              <div className="p-4 lg:p-6 space-y-5">
-                {/* Header and Sub-tab Selector */}
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                      <span>All Document Registers</span>
-                      <span className="text-xs font-normal text-slate-500">
-                        ({allDocsCount} total documents)
-                      </span>
-                    </h3>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      Direct view of individual transactional records across sales, quotations, and banking.
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-lg text-xs font-semibold flex-wrap">
-                    {[
-                      { id: 'invoices', label: `Sales Invoices (${(dossier?.sales_invoices || []).length})` },
-                      { id: 'proformas', label: `Proforma Invoices (${(dossier?.proformas || []).length})` },
-                      { id: 'quotes', label: `Quotations (${(dossier?.quotations || []).length})` },
-                      { id: 'tally', label: `Receipts & Vouchers (${(dossier?.tally_vouchers || []).length})` },
-                    ].map((tab) => (
-                      <button
-                        key={tab.id}
-                        onClick={() => setRawDocSubTab(tab.id)}
-                        className={`px-3 py-1.5 rounded-md transition-all cursor-pointer ${
-                          rawDocSubTab === tab.id
-                            ? 'bg-slate-900 text-white shadow-2xs'
-                            : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
-                        }`}
-                      >
-                        {tab.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="overflow-x-auto rounded-xl border border-slate-200">
-                  {rawDocSubTab === 'invoices' && (
-                    (dossier?.sales_invoices || []).length === 0 ? (
-                      <div className="text-center py-12 text-xs text-slate-500 bg-slate-50">
-                        No sales invoices recorded for this client in {selectedFinYear}.
-                      </div>
-                    ) : (
-                      <table className="min-w-full divide-y divide-slate-200 text-left text-xs">
-                        <thead className="bg-slate-100 text-slate-700 font-bold uppercase tracking-wider text-[10px]">
-                          <tr>
-                            <th className="px-3.5 py-3">Invoice No / Trans No</th>
-                            <th className="px-3.5 py-3">Invoice Date</th>
-                            <th className="px-3.5 py-3">Proforma Ref</th>
-                            <th className="px-3.5 py-3">Fin Year</th>
-                            <th className="px-3.5 py-3">Total Qty</th>
-                            <th className="px-3.5 py-3 text-right">Net Amount</th>
-                            <th className="px-3.5 py-3 text-center">Status</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 bg-white">
-                          {(dossier?.sales_invoices || []).map((inv, idx) => (
-                            <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                              <td className="px-3.5 py-3 font-bold text-slate-900 font-mono">{inv.TransNo}</td>
-                              <td className="px-3.5 py-3">{inv.InvoiceDate}</td>
-                              <td className="px-3.5 py-3 font-mono text-indigo-600">{inv.InvoiceNo || '-'}</td>
-                              <td className="px-3.5 py-3 font-mono">{inv.FinYearVal}</td>
-                              <td className="px-3.5 py-3">{inv.TotalQty}</td>
-                              <td className="px-3.5 py-3 text-right font-black text-slate-900 font-mono">{fmt(inv.NetAmount)}</td>
-                              <td className="px-3.5 py-3 text-center">
-                                <span
-                                  className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${
-                                    formatApprovalStatus(inv.ApprovalStatus) === 'Approved'
-                                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                      : 'bg-amber-50 text-amber-700 border-amber-200'
-                                  }`}
-                                >
-                                  {formatApprovalStatus(inv.ApprovalStatus)}
-                                </span>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    )
-                  )}
-
-                  {rawDocSubTab === 'proformas' && (
-                    (dossier?.proformas || []).length === 0 ? (
-                      <div className="text-center py-12 text-xs text-slate-500 bg-slate-50">
-                        No proforma invoices recorded for this client in {selectedFinYear}.
-                      </div>
-                    ) : (
-                      <table className="min-w-full divide-y divide-slate-200 text-left text-xs">
-                        <thead className="bg-slate-100 text-slate-700 font-bold uppercase tracking-wider text-[10px]">
-                          <tr>
-                            <th className="px-3.5 py-3">Proforma No</th>
-                            <th className="px-3.5 py-3">Date</th>
-                            <th className="px-3.5 py-3">Quote Ref</th>
-                            <th className="px-3.5 py-3">Fin Year</th>
-                            <th className="px-3.5 py-3">Total Qty</th>
-                            <th className="px-3.5 py-3 text-right">Net Amount</th>
-                            <th className="px-3.5 py-3 text-center">Approval</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 bg-white">
-                          {(dossier?.proformas || []).map((p, idx) => (
-                            <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                              <td className="px-3.5 py-3 font-bold text-slate-900 font-mono">{p.TransNo}</td>
-                              <td className="px-3.5 py-3">{p.TransDate}</td>
-                              <td className="px-3.5 py-3 font-mono text-indigo-600">{p.QuotationNo || '-'}</td>
-                              <td className="px-3.5 py-3 font-mono">{p.FinYearVal}</td>
-                              <td className="px-3.5 py-3">{p.TotalQty}</td>
-                              <td className="px-3.5 py-3 text-right font-black text-slate-900 font-mono">{fmt(p.NetAmount)}</td>
-                              <td className="px-3.5 py-3 text-center">
-                                <span
-                                  className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${
-                                    formatApprovalStatus(p.ApprovalStatus) === 'Approved'
-                                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                      : 'bg-amber-50 text-amber-700 border-amber-200'
-                                  }`}
-                                >
-                                  {formatApprovalStatus(p.ApprovalStatus)}
-                                </span>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    )
-                  )}
-
-                  {rawDocSubTab === 'quotes' && (
-                    (dossier?.quotations || []).length === 0 ? (
-                      <div className="text-center py-12 text-xs text-slate-500 bg-slate-50">
-                        No quotations recorded for this client in {selectedFinYear}.
-                      </div>
-                    ) : (
-                      <table className="min-w-full divide-y divide-slate-200 text-left text-xs">
-                        <thead className="bg-slate-100 text-slate-700 font-bold uppercase tracking-wider text-[10px]">
-                          <tr>
-                            <th className="px-3.5 py-3">Quote No</th>
-                            <th className="px-3.5 py-3">Date</th>
-                            <th className="px-3.5 py-3">Product / Scope</th>
-                            <th className="px-3.5 py-3">Fin Year</th>
-                            <th className="px-3.5 py-3 text-right">Net Amount</th>
-                            <th className="px-3.5 py-3 text-center">Status</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 bg-white">
-                          {(dossier?.quotations || []).map((q, idx) => (
-                            <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                              <td className="px-3.5 py-3 font-bold text-slate-900 font-mono">{q.TransNo}</td>
-                              <td className="px-3.5 py-3">{q.TransDate}</td>
-                              <td className="px-3.5 py-3">{q.Product || '-'}</td>
-                              <td className="px-3.5 py-3 font-mono">{q.FinYearVal}</td>
-                              <td className="px-3.5 py-3 text-right font-black text-slate-900 font-mono">{fmt(q.NetAmount)}</td>
-                              <td className="px-3.5 py-3 text-center">
-                                <span
-                                  className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${
-                                    formatApprovalStatus(q.ApprovalStatus) === 'Approved'
-                                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                      : 'bg-amber-50 text-amber-700 border-amber-200'
-                                  }`}
-                                >
-                                  {formatApprovalStatus(q.ApprovalStatus)}
-                                </span>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    )
-                  )}
-
-                  {rawDocSubTab === 'tally' && (
-                    (dossier?.tally_vouchers || []).length === 0 ? (
-                      <div className="text-center py-12 text-xs text-slate-500 bg-slate-50">
-                        No receipts or vouchers recorded for this client in {selectedFinYear}.
-                      </div>
-                    ) : (
-                      <table className="min-w-full divide-y divide-slate-200 text-left text-xs">
-                        <thead className="bg-slate-100 text-slate-700 font-bold uppercase tracking-wider text-[10px]">
-                          <tr>
-                            <th className="px-3.5 py-3">Voucher No</th>
-                            <th className="px-3.5 py-3">Date</th>
-                            <th className="px-3.5 py-3">Trans Type</th>
-                            <th className="px-3.5 py-3">Narration / UTR</th>
-                            <th className="px-3.5 py-3 text-right">Debit</th>
-                            <th className="px-3.5 py-3 text-right">Credit (Advance)</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 bg-white font-mono">
-                          {(dossier?.tally_vouchers || []).map((t, idx) => (
-                            <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                              <td className="px-3.5 py-3 font-bold text-slate-900">{t.TransNo}</td>
-                              <td className="px-3.5 py-3 font-sans">{t.TransDate}</td>
-                              <td className="px-3.5 py-3 font-sans">
-                                <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded text-[10px] font-semibold">
-                                  {t.TransType}
-                                </span>
-                              </td>
-                              <td className="px-3.5 py-3 font-sans text-slate-600 max-w-xs truncate">
-                                {t.Narration || '-'}
-                              </td>
-                              <td className="px-3.5 py-3 text-right text-rose-700">{t.DebitAmount > 0 ? fmt(t.DebitAmount) : '-'}</td>
-                              <td className="px-3.5 py-3 text-right text-emerald-700 font-bold">{t.CreditAmount > 0 ? fmt(t.CreditAmount) : '-'}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    )
-                  )}
-                </div>
               </div>
             )}
           </div>
-        </>
+        </div>
       )}
-
     </div>
   );
 };
 
 export default CustomerReportPage;
-

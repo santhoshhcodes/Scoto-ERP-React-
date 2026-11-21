@@ -78,6 +78,8 @@ const INITIAL_FORM_STATE = {
   LedgerCode: '',
   LedgerName: '',
   ChequePrintName: '',
+  CustomerUnit: '',
+  ParentLedgerCode: '',
   Ledger_Class: 'Pvt Company',
   Region: 'Domestic',
   AccLedgerHeaderName: 'Liabilities',
@@ -89,9 +91,9 @@ const INITIAL_FORM_STATE = {
   Add1: '',
   Add2: '',
   Area: '',
-  City: 'Bengaluru',
+  City: '',
   PinCode: '',
-  State: 'Karnataka',
+  State: '',
   Country: 'India',
   MobileNo: '',
   TelNo: '',
@@ -181,13 +183,31 @@ export const LedgerMasterPage = () => {
     requestSort,
   } = useSortableData(filteredLedgers, { key: 'LedgerCode', direction: 'desc' });
 
+  const getNextSequentialCode = (type, existingLedgers = []) => {
+    const prefix = type === 'Customer' ? 'CUS' : type === 'General Ledger' ? 'GL' : 'SUP';
+    const regex = new RegExp(`^${prefix}/(\\d+)`, 'i');
+    let maxSeq = 0;
+    for (const l of existingLedgers) {
+      const code = l.LedgerCode || l.AccGenLdgCode || '';
+      const match = code.match(regex);
+      if (match) {
+        const num = parseInt(match[1], 10);
+        if (!isNaN(num) && num > maxSeq) {
+          maxSeq = num;
+        }
+      }
+    }
+    const nextSeq = maxSeq + 1;
+    return `${prefix}/${String(nextSeq).padStart(5, '0')}`;
+  };
+
   const handleOpenAdd = (defaultType = null) => {
     setEditingLedgerCode(null);
     setErrorMessage(null);
     setSuccessMessage(null);
 
     const type = defaultType || (selectedTypeFilter !== 'ALL' ? selectedTypeFilter : 'Customer');
-    const prefix = type === 'Customer' ? 'CUS-' : type === 'General Ledger' ? 'GL-' : 'SUP-';
+    const nextCode = getNextSequentialCode(type, ledgers);
     const header = type === 'Customer' ? 'Assets' : type === 'General Ledger' ? 'Assets' : 'Liabilities';
     const group = type === 'Customer' ? 'Sundry Debtors (Receivables)' : type === 'General Ledger' ? 'Bank & Cash Accounts' : 'Sundry Creditors (Suppliers & Vendors)';
     const balType = type === 'Customer' ? 'Dr' : type === 'General Ledger' ? 'Dr' : 'Cr';
@@ -195,7 +215,7 @@ export const LedgerMasterPage = () => {
     setFormData({
       ...INITIAL_FORM_STATE,
       LedgerType: type,
-      LedgerCode: `${prefix}${Math.floor(1000 + Math.random() * 9000)}`,
+      LedgerCode: nextCode,
       AccLedgerHeaderName: header,
       AccGroupName: group,
       BalanceType: balType,
@@ -207,7 +227,12 @@ export const LedgerMasterPage = () => {
     setEditingLedgerCode(ledger.LedgerCode || ledger.id);
     setErrorMessage(null);
     setSuccessMessage(null);
-    setFormData({ ...INITIAL_FORM_STATE, ...ledger });
+    setFormData({
+      ...INITIAL_FORM_STATE,
+      ...ledger,
+      CustomerUnit: ledger.CustomerUnit || '',
+      ParentLedgerCode: ledger.ParentLedgerCode || '',
+    });
     setViewMode('form');
   };
 
@@ -219,23 +244,29 @@ export const LedgerMasterPage = () => {
 
   const handleChange = (field, value) => {
     setFormData((prev) => {
-      const updated = { ...prev, [field]: value };
-      if (field === 'LedgerName' && !prev.ChequePrintName) {
-        updated.ChequePrintName = value;
+      let finalVal = value;
+      if (field === 'CustomerUnit') {
+        finalVal = (value || '').toUpperCase();
       }
+
+      const updated = { ...prev, [field]: finalVal };
+
+      if (field === 'LedgerName' && !prev.ChequePrintName) {
+        updated.ChequePrintName = finalVal;
+      }
+
       if (field === 'LedgerType' && !editingLedgerCode) {
+        const nextCode = getNextSequentialCode(value, ledgers);
+        updated.LedgerCode = nextCode;
         if (value === 'Customer') {
-          updated.LedgerCode = `CUS-${Math.floor(1000 + Math.random() * 9000)}`;
           updated.AccLedgerHeaderName = 'Assets';
           updated.AccGroupName = 'Sundry Debtors (Receivables)';
           updated.BalanceType = 'Dr';
         } else if (value === 'Supplier') {
-          updated.LedgerCode = `SUP-${Math.floor(1000 + Math.random() * 9000)}`;
           updated.AccLedgerHeaderName = 'Liabilities';
           updated.AccGroupName = 'Sundry Creditors (Suppliers & Vendors)';
           updated.BalanceType = 'Cr';
         } else if (value === 'General Ledger') {
-          updated.LedgerCode = `GL-${Math.floor(1000 + Math.random() * 9000)}`;
           updated.AccLedgerHeaderName = 'Assets';
           updated.AccGroupName = 'Bank & Cash Accounts';
           updated.BalanceType = 'Dr';
@@ -247,16 +278,33 @@ export const LedgerMasterPage = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.LedgerName.trim()) return;
+    if (!formData.LedgerName || !formData.LedgerName.trim()) {
+      setErrorMessage('Please enter the Ledger / Company Name.');
+      return;
+    }
 
     setErrorMessage(null);
 
     const isGL = formData.LedgerType === 'General Ledger';
+    const finalCode = formData.LedgerCode?.trim() || getNextSequentialCode(formData.LedgerType, ledgers);
+
+    let cleanCustomerUnit = null;
+    const rawUnit = (formData.CustomerUnit || '').trim().toUpperCase();
+    if (rawUnit && rawUnit !== 'UNIT' && rawUnit !== 'UNIT-' && rawUnit !== 'UNIT -') {
+      cleanCustomerUnit = (rawUnit.startsWith('UNIT ') || rawUnit.startsWith('PLANT ') || rawUnit.startsWith('SITE '))
+        ? rawUnit
+        : `UNIT ${rawUnit}`;
+    }
+    const cleanParentLedger = (formData.ParentLedgerCode || '').trim() || null;
+
     const payload = {
       ...formData,
+      CustomerUnit: cleanCustomerUnit,
+      ParentLedgerCode: cleanParentLedger,
+      LedgerCode: finalCode,
       ChequePrintName: (formData.ChequePrintName?.trim() || formData.LedgerName?.trim()),
       PaymentDays: isGL ? '0' : (formData.PaymentDays || '30'),
-      OpeningBalance: formData.OpeningBalance === '' ? '0.00' : (formData.OpeningBalance ?? '0.00'),
+      OpeningBalance: formData.OpeningBalance === '' || formData.OpeningBalance == null ? '0.00' : String(formData.OpeningBalance),
       BalanceType: formData.BalanceType || (formData.LedgerType === 'Customer' ? 'Dr' : 'Cr'),
     };
 
@@ -380,7 +428,7 @@ export const LedgerMasterPage = () => {
               {/* LedgerCode */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                  Ledger Code <span className="text-rose-500">*</span>
+                  Ledger Code
                 </label>
                 <div className="relative">
                   <Hash className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
@@ -389,13 +437,12 @@ export const LedgerMasterPage = () => {
                     value={formData.LedgerCode}
                     onChange={(e) => handleChange('LedgerCode', e.target.value)}
                     disabled={!!editingLedgerCode}
-                    placeholder={isGeneralLedger ? 'e.g. GL-1001' : 'e.g. SUP-1001'}
+                    placeholder={isGeneralLedger ? 'e.g. GL/00001 (Auto)' : formData.LedgerType === 'Customer' ? 'e.g. CUS/00001 (Auto)' : 'e.g. SUP/00001 (Auto)'}
                     className={`w-full pl-9 pr-3 py-2 text-sm rounded-lg border font-mono font-medium ${
                       editingLedgerCode
                         ? 'bg-slate-100 text-slate-500 border-slate-200 cursor-not-allowed'
                         : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500'
                     }`}
-                    required
                   />
                 </div>
               </div>
@@ -425,11 +472,11 @@ export const LedgerMasterPage = () => {
               </div>
             </div>
 
-            {/* Non-GL specific: ChequePrintName, Entity Classification, Payment Terms */}
+            {/* Non-GL specific: ChequePrintName, Customer Unit, Entity Classification, Payment Terms */}
             {!isGeneralLedger && (
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4.5">
                 {/* ChequePrintName */}
-                <div className="md:col-span-2">
+                <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1.5">
                     Cheque Print Name
                   </label>
@@ -440,6 +487,29 @@ export const LedgerMasterPage = () => {
                     placeholder="Name to appear on bank remittances"
                     className="w-full px-3 py-2 text-sm rounded-lg bg-slate-50 border border-slate-200 text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
                   />
+                </div>
+
+                {/* CustomerUnit */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                    Customer Unit / Plant
+                  </label>
+                  <div className="flex rounded-lg shadow-xs overflow-hidden border border-slate-200 bg-slate-50 focus-within:bg-white focus-within:border-emerald-500 focus-within:ring-2 focus-within:ring-emerald-500/20">
+                    <span className="inline-flex items-center px-2.5 bg-slate-200/70 text-slate-700 font-mono font-bold text-xs select-none border-r border-slate-200">
+                      UNIT
+                    </span>
+                    <input
+                      type="text"
+                      value={(formData.CustomerUnit || '').replace(/^UNIT\s*/i, '')}
+                      onChange={(e) => {
+                        const rawLetters = e.target.value.toUpperCase().replace(/^UNIT\s*/i, '').trimStart();
+                        const finalUnit = rawLetters ? `UNIT ${rawLetters.trim()}` : '';
+                        handleChange('CustomerUnit', finalUnit);
+                      }}
+                      placeholder="e.g. A / CA / 1 / 2"
+                      className="w-full px-3 py-2 text-sm bg-transparent text-slate-900 focus:outline-none font-mono font-bold uppercase"
+                    />
+                  </div>
                 </div>
 
                 {/* Ledger_Class */}
@@ -486,13 +556,12 @@ export const LedgerMasterPage = () => {
               {/* AccLedgerHeaderName */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                  Account Header <span className="text-rose-500">*</span>
+                  Account Header
                 </label>
                 <select
                   value={formData.AccLedgerHeaderName}
                   onChange={(e) => handleChange('AccLedgerHeaderName', e.target.value)}
                   className="w-full px-3 py-2 text-sm rounded-lg bg-slate-50 border border-slate-200 text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
-                  required
                 >
                   {ACCOUNT_HEADERS.map((hdr) => (
                     <option key={hdr} value={hdr}>
@@ -505,13 +574,12 @@ export const LedgerMasterPage = () => {
               {/* AccGroupName */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                  Account Group <span className="text-rose-500">*</span>
+                  Account Group
                 </label>
                 <select
                   value={formData.AccGroupName}
                   onChange={(e) => handleChange('AccGroupName', e.target.value)}
                   className="w-full px-3 py-2 text-sm rounded-lg bg-slate-50 border border-slate-200 text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
-                  required
                 >
                   {ACCOUNT_GROUPS.map((grp) => (
                     <option key={grp} value={grp}>
@@ -542,13 +610,12 @@ export const LedgerMasterPage = () => {
               {/* CostCenter */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                  Cost Center Allocation <span className="text-rose-500">*</span>
+                  Cost Center Allocation
                 </label>
                 <select
                   value={formData.CostCenter}
                   onChange={(e) => handleChange('CostCenter', e.target.value)}
                   className="w-full px-3 py-2 text-sm rounded-lg bg-slate-50 border border-slate-200 text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
-                  required
                 >
                   <option value="Cost Centre">Cost Centre</option>
                   <option value="Profit Centre">Profit Centre</option>
@@ -643,7 +710,7 @@ export const LedgerMasterPage = () => {
                   type="text"
                   value={formData.Area}
                   onChange={(e) => handleChange('Area', e.target.value)}
-                  placeholder="e.g. Electronic City"
+                  placeholder="e.g. Area / Locality"
                   className="w-full px-3 py-2 text-sm rounded-lg bg-slate-50 border border-slate-200 text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                 />
               </div>
@@ -659,7 +726,7 @@ export const LedgerMasterPage = () => {
                   type="text"
                   value={formData.City}
                   onChange={(e) => handleChange('City', e.target.value)}
-                  placeholder="e.g. Bengaluru"
+                  placeholder="e.g. City / Town"
                   className="w-full px-3 py-2 text-sm rounded-lg bg-slate-50 border border-slate-200 text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                 />
               </div>
@@ -687,7 +754,7 @@ export const LedgerMasterPage = () => {
                   type="text"
                   value={formData.State}
                   onChange={(e) => handleChange('State', e.target.value)}
-                  placeholder="e.g. Karnataka"
+                  placeholder="e.g. State"
                   className="w-full px-3 py-2 text-sm rounded-lg bg-slate-50 border border-slate-200 text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                 />
               </div>
@@ -1406,11 +1473,21 @@ export const LedgerMasterPage = () => {
                       {ledger.LedgerCode}
                     </td>
                     <td className="py-3.5 px-4 font-semibold text-slate-900 max-w-xs truncate">
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <span>{ledger.LedgerName}</span>
+                        {ledger.CustomerUnit && (
+                          <span className="text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-300 px-1.5 py-0.2 rounded font-mono">
+                            {ledger.CustomerUnit}
+                          </span>
+                        )}
                         {ledger.LedgerType === 'Supplier' && (
                           <span className="text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 px-1.5 py-0.2 rounded">
                             Supplier
+                          </span>
+                        )}
+                        {ledger.LedgerType === 'Customer' && (
+                          <span className="text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200 px-1.5 py-0.2 rounded">
+                            Customer
                           </span>
                         )}
                       </div>
@@ -1480,7 +1557,7 @@ export const LedgerMasterPage = () => {
                           <Edit2 className="h-3.5 w-3.5" />
                         </button>
                         <button
-                          onClick={() => handleDelete(ledger.id || ledger.LedgerCode)}
+                          onClick={() => handleDelete(ledger.LedgerCode)}
                           className="p-1.5 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
                           title="Delete Ledger"
                         >

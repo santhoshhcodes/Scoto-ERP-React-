@@ -70,7 +70,7 @@ export const masterApi = {
     };
 
     return await apiClient.put(
-      API_ENDPOINTS.MASTER.ITEM_BY_CODE(encodeURIComponent(itemCode)),
+      API_ENDPOINTS.MASTER.ITEM_BY_CODE(itemCode),
       formattedPayload
     );
   },
@@ -81,7 +81,7 @@ export const masterApi = {
    */
   deleteItem: async (itemCode) => {
     return await apiClient.delete(
-      API_ENDPOINTS.MASTER.ITEM_BY_CODE(encodeURIComponent(itemCode))
+      API_ENDPOINTS.MASTER.ITEM_BY_CODE(itemCode)
     );
   },
 
@@ -119,7 +119,7 @@ export const masterApi = {
    */
   updateLedger: async (ledgerCode, payload) => {
     return await apiClient.put(
-      API_ENDPOINTS.MASTER.LEDGER_BY_CODE(encodeURIComponent(ledgerCode)),
+      API_ENDPOINTS.MASTER.LEDGER_BY_CODE(ledgerCode),
       payload
     );
   },
@@ -130,7 +130,7 @@ export const masterApi = {
    */
   deleteLedger: async (ledgerCode) => {
     return await apiClient.delete(
-      API_ENDPOINTS.MASTER.LEDGER_BY_CODE(encodeURIComponent(ledgerCode))
+      API_ENDPOINTS.MASTER.LEDGER_BY_CODE(ledgerCode)
     );
   },
 
@@ -140,6 +140,16 @@ export const masterApi = {
    */
   getLedgerHeaders: async () => {
     return await apiClient.get(API_ENDPOINTS.MASTER.LEDGER_HEADERS);
+  },
+
+  /**
+   * Fetch next sequential ledger code (e.g. CUS/00029, SUP/00006, GL/00763)
+   * GET /api/v1/master/ledgers/next-code?ledger_type={ledger_type}
+   */
+  getNextLedgerCode: async (ledgerType) => {
+    return await apiClient.get(API_ENDPOINTS.MASTER.NEXT_LEDGER_CODE, {
+      params: { ledger_type: ledgerType },
+    });
   },
 };
 
