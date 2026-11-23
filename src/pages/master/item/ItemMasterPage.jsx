@@ -19,13 +19,14 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import StatCard from '../../../components/common/StatCard';
+import { PaginationBar } from '../../../components/common/PaginationBar';
 import {
   useMasterItems,
   useCreateMasterItem,
   useUpdateMasterItem,
   useDeleteMasterItem,
 } from '../../../api/masterApi';
-import { useSortableData, SortableHeader } from '../../../utils/sortUtils';
+import { SortableHeader } from '../../../utils/sortUtils';
 
 const PRODUCT_TYPES = ['ESSL', 'OTHERS', 'BIOMETRIC', 'SECURITY_SYSTEMS', 'ACCESS_CONTROL'];
 const UOM_OPTIONS = ['No', 'Pcs', 'Roll', 'Set', 'Mtr', 'Box', 'Unit', 'Kg'];
@@ -61,6 +62,10 @@ export const ItemMasterPage = () => {
   // Search & Filter
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedProductType, setSelectedProductType] = useState('ALL');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [sortKey, setSortKey] = useState('ItemCode');
+  const [sortDir, setSortDir] = useState('desc');
 
   // React Query Hooks
   const {
@@ -72,6 +77,10 @@ export const ItemMasterPage = () => {
   } = useMasterItems({
     search: searchQuery,
     product_type: selectedProductType !== 'ALL' ? selectedProductType : undefined,
+    page,
+    pageSize,
+    sortBy: sortKey,
+    sortOrder: sortDir,
   });
 
   const createItemMutation = useCreateMasterItem();
@@ -82,32 +91,24 @@ export const ItemMasterPage = () => {
 
   // Real items fetched from MSSQL backend
   const items = itemsResponse?.data ?? [];
+  const totalRecords = itemsResponse?.pagination?.total_records ?? itemsResponse?.total ?? items.length;
+  const totalPages = itemsResponse?.pagination?.total_pages ?? Math.max(1, Math.ceil(totalRecords / pageSize));
 
   // Metrics
-  const totalItems = items.length;
+  const totalItems = totalRecords;
   const esslCount = items.filter((i) => i.ProductType === 'ESSL').length;
   const serialTracked = items.filter((i) => i.SerialNo === 'YES').length;
   const activeItems = items.filter((i) => i.Status === 'ACTIVE').length;
 
-  // Filtered List (client-side fallback filter)
-  const filteredItems = items.filter((item) => {
-    const matchesSearch =
-      item.ItemDescription?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.ItemCode?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.ItemType?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.HSNCode?.toLowerCase().includes(searchQuery.toLowerCase());
-
-    const matchesType =
-      selectedProductType === 'ALL' || item.ProductType === selectedProductType;
-
-    return matchesSearch && matchesType;
-  });
-
-  const {
-    sortedItems: sortedFilteredItems,
-    sortConfig,
-    requestSort,
-  } = useSortableData(filteredItems, { key: 'ItemCode', direction: 'desc' });
+  const handleRequestSort = (key) => {
+    if (sortKey === key) {
+      setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir('asc');
+    }
+    setPage(1);
+  };
 
   // Open Form for Adding New Item
   const handleOpenAdd = () => {
@@ -544,7 +545,10 @@ export const ItemMasterPage = () => {
           <input
             type="text"
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setPage(1);
+            }}
             placeholder="Search by code, description, HSN..."
             className="w-full pl-9 pr-4 py-2 text-xs sm:text-sm rounded-lg border border-slate-200 bg-slate-50/50 text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
           />
@@ -556,7 +560,10 @@ export const ItemMasterPage = () => {
           {['ALL', 'ESSL', 'BIOMETRIC', 'ACCESS_CONTROL', 'OTHERS'].map((type) => (
             <button
               key={type}
-              onClick={() => setSelectedProductType(type)}
+              onClick={() => {
+                setSelectedProductType(type);
+                setPage(1);
+              }}
               className={`px-3 py-1.5 text-xs font-semibold rounded-lg shrink-0 transition-all cursor-pointer ${selectedProductType === type
                 ? 'bg-indigo-600 text-white shadow-xs'
                 : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900'
@@ -577,56 +584,56 @@ export const ItemMasterPage = () => {
                 <th className="py-3.5 px-4 w-12 text-center">S.No</th>
                 <SortableHeader
                   sortKey="ProductType"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   className="py-3.5 px-4"
                 >
                   Product Type
                 </SortableHeader>
                 <SortableHeader
                   sortKey="ItemCode"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   className="py-3.5 px-4"
                 >
                   Item Code
                 </SortableHeader>
                 <SortableHeader
                   sortKey="ItemDescription"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   className="py-3.5 px-4"
                 >
                   Item Description
                 </SortableHeader>
                 <SortableHeader
                   sortKey="ItemType"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   className="py-3.5 px-4"
                 >
                   Classification
                 </SortableHeader>
                 <SortableHeader
                   sortKey="HSNCode"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   className="py-3.5 px-4"
                 >
                   HSN
                 </SortableHeader>
                 <SortableHeader
                   sortKey="UOM"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   className="py-3.5 px-4"
                 >
                   UOM
                 </SortableHeader>
                 <SortableHeader
                   sortKey="SerialNo"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   align="center"
                   className="py-3.5 px-4 text-center"
                 >
@@ -634,8 +641,8 @@ export const ItemMasterPage = () => {
                 </SortableHeader>
                 <SortableHeader
                   sortKey="Status"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   align="center"
                   className="py-3.5 px-4 text-center"
                 >
@@ -668,7 +675,7 @@ export const ItemMasterPage = () => {
                     </button>
                   </td>
                 </tr>
-              ) : filteredItems.length === 0 ? (
+              ) : items.length === 0 ? (
                 <tr>
                   <td colSpan={10} className="py-12 text-center text-slate-400">
                     <Package className="h-8 w-8 mx-auto mb-2 opacity-40 text-slate-400" />
@@ -679,13 +686,13 @@ export const ItemMasterPage = () => {
                   </td>
                 </tr>
               ) : (
-                sortedFilteredItems.map((item, index) => (
+                items.map((item, index) => (
                   <tr
                     key={item.ItemCode || index}
                     className="hover:bg-slate-50/80 transition-colors"
                   >
                     <td className="py-3.5 px-4 text-center font-mono text-xs text-slate-400 font-medium">
-                      {index + 1}
+                      {(page - 1) * pageSize + index + 1}
                     </td>
                     <td className="py-3.5 px-4">
                       <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-slate-100 text-slate-700 border border-slate-200">
@@ -759,15 +766,21 @@ export const ItemMasterPage = () => {
           </table>
         </div>
 
-        {/* Footer info bar matching DataTable */}
-        <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50/50 px-4 py-3 text-xs text-slate-600">
-          <div>
-            Showing <span className="font-semibold text-slate-700">{filteredItems.length}</span> entries
-          </div>
-          <div className="text-slate-400 text-xs font-medium">
-            Item Master Catalog
-          </div>
-        </div>
+        {/* Footer with Enterprise PaginationBar */}
+        <PaginationBar
+          page={page}
+          pageSize={pageSize}
+          totalRecords={totalRecords}
+          totalPages={totalPages}
+          onPageChange={(newPage) => setPage(newPage)}
+          onPageSizeChange={(newSize) => {
+            setPageSize(newSize);
+            setPage(1);
+          }}
+          pageSizeOptions={[10, 20, 50, 100]}
+          itemLabel="items"
+          isLoading={isFetching}
+        />
       </div>
     </div>
   );

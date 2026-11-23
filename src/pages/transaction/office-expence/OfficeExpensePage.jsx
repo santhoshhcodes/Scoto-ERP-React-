@@ -339,10 +339,11 @@ export const OfficeExpensePage = () => {
 
   // Calculate Running Balance Chronologically for Ledger
   const transactionsWithBalance = useMemo(() => {
-    if (!Array.isArray(rawTransactions)) return [];
+    const txList = Array.isArray(rawTransactions) ? rawTransactions : rawTransactions?.data || rawTransactions?.items || [];
+    if (!Array.isArray(txList) || txList.length === 0) return [];
 
     // Sort chronologically ascending to compute correct running balance
-    const sorted = [...rawTransactions].sort((a, b) => {
+    const sorted = [...txList].sort((a, b) => {
       const dateA = new Date(a.TransactionDate).getTime();
       const dateB = new Date(b.TransactionDate).getTime();
       if (dateA !== dateB) return dateA - dateB;

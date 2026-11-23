@@ -29,7 +29,8 @@ import {
   useDeleteProformaInvoice,
   useDownloadProformaInvoiceExcel,
 } from '../../../api/transactionApi';
-import { useSortableData, SortableHeader } from '../../../utils/sortUtils';
+import { SortableHeader } from '../../../utils/sortUtils';
+import { PaginationBar } from '../../../components/common/PaginationBar';
 import { DocumentActionDropdown } from '../../../components/common/DocumentActionDropdown';
 import { DocumentPrintModal } from '../../../components/common/DocumentPrintModal';
 import { useFinancialYear } from '../../../context/FinancialYearContext';
@@ -41,6 +42,10 @@ export const ProformaInvoicePage = () => {
   const [editingTransNo, setEditingTransNo] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [notification, setNotification] = useState(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [sortKey, setSortKey] = useState('TransDate');
+  const [sortDir, setSortDir] = useState('desc');
 
   // TanStack Queries & Mutations
   const {
@@ -49,7 +54,14 @@ export const ProformaInvoicePage = () => {
     isFetching,
     error: fetchError,
     refetch,
-  } = useProformaInvoices({ search: searchQuery, finYear: selectedFinYear });
+  } = useProformaInvoices({
+    search: searchQuery,
+    finYear: selectedFinYear,
+    page,
+    pageSize,
+    sortBy: sortKey,
+    sortOrder: sortDir,
+  });
 
   const { data: quotationRes } = useQuotations({ finYear: selectedFinYear });
   const { data: masterItemsRes } = useMasterItems();
@@ -64,11 +76,18 @@ export const ProformaInvoicePage = () => {
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
 
   const proformas = proformaRes?.data ?? [];
-  const {
-    sortedItems: sortedProformas,
-    sortConfig,
-    requestSort,
-  } = useSortableData(proformas, { key: 'TransDate', direction: 'desc' });
+  const totalRecords = proformaRes?.pagination?.total_records ?? proformaRes?.total ?? proformas.length;
+  const totalPages = proformaRes?.pagination?.total_pages ?? Math.max(1, Math.ceil(totalRecords / pageSize));
+
+  const handleRequestSort = (key) => {
+    if (sortKey === key) {
+      setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir('asc');
+    }
+    setPage(1);
+  };
   const availableQuotations = quotationRes?.data ?? [];
   const availableItems = masterItemsRes?.data ?? [];
   const availableLedgers = masterLedgersRes?.data ?? [];
@@ -847,10 +866,16 @@ export const ProformaInvoicePage = () => {
             <input
               type="text"
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setPage(1);
+              }}
               placeholder="Search TransNo, Customer, Quotation..."
               className="w-full pl-8.5 pr-3 py-1.5 text-xs rounded-lg bg-slate-50 border border-slate-200"
             />
+          </div>
+          <div className="text-xs text-slate-500 font-medium">
+            Showing <strong className="text-slate-900">{totalRecords}</strong> proformas
           </div>
         </div>
 
@@ -860,40 +885,40 @@ export const ProformaInvoicePage = () => {
               <tr>
                 <SortableHeader
                   sortKey="TransNo"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   className="px-4 py-3"
                 >
                   Trans No
                 </SortableHeader>
                 <SortableHeader
                   sortKey="TransDate"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   className="px-4 py-3"
                 >
                   Date
                 </SortableHeader>
                 <SortableHeader
                   sortKey="QuotationNo"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   className="px-4 py-3"
                 >
                   Quotation No
                 </SortableHeader>
                 <SortableHeader
                   sortKey="CustomerName"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   className="px-4 py-3"
                 >
                   Customer Name
                 </SortableHeader>
                 <SortableHeader
                   sortKey="FinalNetAmount"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   align="right"
                   className="px-4 py-3 text-right"
                 >
@@ -901,8 +926,8 @@ export const ProformaInvoicePage = () => {
                 </SortableHeader>
                 <SortableHeader
                   sortKey="ApprovalStatus"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   align="center"
                   className="px-4 py-3 text-center"
                 >
@@ -942,7 +967,7 @@ export const ProformaInvoicePage = () => {
                   </td>
                 </tr>
               ) : (
-                sortedProformas.map((pi) => (
+                proformas.map((pi) => (
                   <tr key={pi.TransNo} className="hover:bg-slate-50/70">
                     <td className="px-4 py-3 font-mono font-bold text-indigo-700">{pi.TransNo}</td>
                     <td className="px-4 py-3 text-slate-600">{pi.TransDate}</td>
@@ -992,6 +1017,22 @@ export const ProformaInvoicePage = () => {
             </tbody>
           </table>
         </div>
+
+        {/* Footer with Enterprise PaginationBar */}
+        <PaginationBar
+          page={page}
+          pageSize={pageSize}
+          totalRecords={totalRecords}
+          totalPages={totalPages}
+          onPageChange={(newPage) => setPage(newPage)}
+          onPageSizeChange={(newSize) => {
+            setPageSize(newSize);
+            setPage(1);
+          }}
+          pageSizeOptions={[10, 20, 50, 100]}
+          itemLabel="proformas"
+          isLoading={isFetching}
+        />
       </div>
 
       {/* Universal A4 Document Print Modal */}

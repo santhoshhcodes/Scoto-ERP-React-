@@ -61,7 +61,7 @@ export const EmployeeListPage = () => {
 
   // Queries & Mutations
   const {
-    data: employees = [],
+    data: employeesRaw = [],
     isLoading,
     isFetching,
     refetch,
@@ -69,6 +69,8 @@ export const EmployeeListPage = () => {
     search: searchTerm,
     limit: 100,
   });
+
+  const employees = Array.isArray(employeesRaw) ? employeesRaw : employeesRaw?.data || employeesRaw?.items || [];
 
   const createEmployeeMutation = useCreateEmployee();
   const updateEmployeeMutation = useUpdateEmployee();

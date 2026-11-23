@@ -23,7 +23,7 @@ export const masterApi = {
    * Fetch active items from MSSQL Mst_Item
    * GET /api/v1/master/items?search={search}&product_type={product_type}
    */
-  getItems: async ({ search, product_type } = {}) => {
+  getItems: async ({ search, product_type, page, pageSize, sortBy, sortOrder, all } = {}) => {
     const params = {};
     if (search && search.trim()) {
       params.search = search.trim();
@@ -31,6 +31,11 @@ export const masterApi = {
     if (product_type && product_type !== 'ALL') {
       params.product_type = product_type;
     }
+    if (page !== undefined) params.page = page;
+    if (pageSize !== undefined) params.page_size = pageSize;
+    if (sortBy) params.sort_by = sortBy;
+    if (sortOrder) params.sort_order = sortOrder;
+    if (all) params.all = true;
 
     return await apiClient.get(API_ENDPOINTS.MASTER.ITEMS, { params });
   },
@@ -93,7 +98,7 @@ export const masterApi = {
    * Fetch General Ledgers and Party Accounts
    * GET /api/v1/master/ledgers?search={search}&ledger_type={ledger_type}
    */
-  getLedgers: async ({ search, ledger_type } = {}) => {
+  getLedgers: async ({ search, ledger_type, page, pageSize, sortBy, sortOrder, all } = {}) => {
     const params = {};
     if (search && search.trim()) {
       params.search = search.trim();
@@ -101,6 +106,11 @@ export const masterApi = {
     if (ledger_type && ledger_type !== 'ALL') {
       params.ledger_type = ledger_type;
     }
+    if (page !== undefined) params.page = page;
+    if (pageSize !== undefined) params.page_size = pageSize;
+    if (sortBy) params.sort_by = sortBy;
+    if (sortOrder) params.sort_order = sortOrder;
+    if (all) params.all = true;
 
     return await apiClient.get(API_ENDPOINTS.MASTER.LEDGERS, { params });
   },
@@ -163,12 +173,20 @@ export const masterApi = {
 export const useMasterItems = ({
   search = '',
   product_type = 'ALL',
+  page,
+  pageSize,
+  sortBy,
+  sortOrder,
+  all,
   enabled = true,
   refetchInterval = false,
 } = {}) => {
+  const isExplicitPagination = page !== undefined || pageSize !== undefined;
+  const resolvedAll = all !== undefined ? all : !isExplicitPagination;
+
   return useQuery({
-    queryKey: ['master', 'items', { search, product_type }],
-    queryFn: () => masterApi.getItems({ search, product_type }),
+    queryKey: ['master', 'items', { search, product_type, page, pageSize, sortBy, sortOrder, all: resolvedAll }],
+    queryFn: () => masterApi.getItems({ search, product_type, page, pageSize, sortBy, sortOrder, all: resolvedAll }),
     enabled,
     staleTime: 30000,
     refetchInterval,
@@ -224,12 +242,20 @@ export const useDeleteMasterItem = () => {
 export const useMasterLedgers = ({
   search = '',
   ledger_type = 'ALL',
+  page,
+  pageSize,
+  sortBy,
+  sortOrder,
+  all,
   enabled = true,
   refetchInterval = false,
 } = {}) => {
+  const isExplicitPagination = page !== undefined || pageSize !== undefined;
+  const resolvedAll = all !== undefined ? all : !isExplicitPagination;
+
   return useQuery({
-    queryKey: ['master', 'ledgers', { search, ledger_type }],
-    queryFn: () => masterApi.getLedgers({ search, ledger_type }),
+    queryKey: ['master', 'ledgers', { search, ledger_type, page, pageSize, sortBy, sortOrder, all: resolvedAll }],
+    queryFn: () => masterApi.getLedgers({ search, ledger_type, page, pageSize, sortBy, sortOrder, all: resolvedAll }),
     enabled,
     staleTime: 30000,
     refetchInterval,

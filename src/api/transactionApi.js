@@ -10,10 +10,16 @@ export const transactionApi = {
   // ==========================================
   // Quotation Module APIs
   // ==========================================
-  getQuotations: async ({ search = '', status, finYear } = {}) => {
+  getQuotations: async ({ search = '', status, finYear, page, pageSize, sortBy, sortOrder, all } = {}) => {
     const params = {};
     if (search && search.trim()) params.search = search.trim();
     if (status && status !== 'ALL') params.status = status;
+    if (finYear && finYear !== 'ALL') params.fin_year = finYear;
+    if (page !== undefined) params.page = page;
+    if (pageSize !== undefined) params.page_size = pageSize;
+    if (sortBy) params.sort_by = sortBy;
+    if (sortOrder) params.sort_order = sortOrder;
+    if (all) params.all = true;
     return await apiClient.get(API_ENDPOINTS.TRANSACTION.QUOTATIONS, { params });
   },
 
@@ -75,10 +81,16 @@ export const transactionApi = {
   // ==========================================
   // Proforma Invoice Module APIs
   // ==========================================
-  getProformaInvoices: async ({ search = '', status, finYear } = {}) => {
+  getProformaInvoices: async ({ search = '', status, finYear, page, pageSize, sortBy, sortOrder, all } = {}) => {
     const params = {};
     if (search && search.trim()) params.search = search.trim();
     if (status && status !== 'ALL') params.status = status;
+    if (finYear && finYear !== 'ALL') params.fin_year = finYear;
+    if (page !== undefined) params.page = page;
+    if (pageSize !== undefined) params.page_size = pageSize;
+    if (sortBy) params.sort_by = sortBy;
+    if (sortOrder) params.sort_order = sortOrder;
+    if (all) params.all = true;
     return await apiClient.get(API_ENDPOINTS.TRANSACTION.PROFORMA_INVOICES, { params });
   },
 
@@ -132,10 +144,16 @@ export const transactionApi = {
   // ==========================================
   // Delivery Challan Module APIs
   // ==========================================
-  getDeliveryChallans: async ({ search = '', returnType, finYear } = {}) => {
+  getDeliveryChallans: async ({ search = '', returnType, finYear, page, pageSize, sortBy, sortOrder, all } = {}) => {
     const params = {};
     if (search && search.trim()) params.search = search.trim();
     if (returnType && returnType !== 'ALL') params.return_type = returnType;
+    if (finYear && finYear !== 'ALL') params.fin_year = finYear;
+    if (page !== undefined) params.page = page;
+    if (pageSize !== undefined) params.page_size = pageSize;
+    if (sortBy) params.sort_by = sortBy;
+    if (sortOrder) params.sort_order = sortOrder;
+    if (all) params.all = true;
     return await apiClient.get(API_ENDPOINTS.TRANSACTION.DELIVERY_CHALLANS, { params });
   },
 
@@ -158,10 +176,16 @@ export const transactionApi = {
   // ==========================================
   // Sales Invoice Module APIs
   // ==========================================
-  getSalesInvoices: async ({ search = '', status, finYear } = {}) => {
+  getSalesInvoices: async ({ search = '', status, finYear, page, pageSize, sortBy, sortOrder, all } = {}) => {
     const params = {};
     if (search && search.trim()) params.search = search.trim();
     if (status && status !== 'ALL') params.status = status;
+    if (finYear && finYear !== 'ALL') params.fin_year = finYear;
+    if (page !== undefined) params.page = page;
+    if (pageSize !== undefined) params.page_size = pageSize;
+    if (sortBy) params.sort_by = sortBy;
+    if (sortOrder) params.sort_order = sortOrder;
+    if (all) params.all = true;
     return await apiClient.get(API_ENDPOINTS.TRANSACTION.SALES_INVOICES, { params });
   },
 
@@ -302,10 +326,12 @@ export const transactionApi = {
 // ==========================================
 
 // Quotations
-export const useQuotations = ({ search = '', status, finYear, enabled = true } = {}) => {
+export const useQuotations = ({ search = '', status, finYear, page, pageSize, sortBy, sortOrder, all, enabled = true } = {}) => {
+  const isExplicitPagination = page !== undefined || pageSize !== undefined;
+  const resolvedAll = all !== undefined ? all : !isExplicitPagination;
   return useQuery({
-    queryKey: ['transaction', 'quotations', { search, status, finYear }],
-    queryFn: () => transactionApi.getQuotations({ search, status, finYear }),
+    queryKey: ['transaction', 'quotations', { search, status, finYear, page, pageSize, sortBy, sortOrder, all: resolvedAll }],
+    queryFn: () => transactionApi.getQuotations({ search, status, finYear, page, pageSize, sortBy, sortOrder, all: resolvedAll }),
     enabled,
     staleTime: 10000,
   });
@@ -379,10 +405,12 @@ export const useReviseQuotation = () => {
 };
 
 // Proforma Invoices
-export const useProformaInvoices = ({ search = '', status, finYear, enabled = true } = {}) => {
+export const useProformaInvoices = ({ search = '', status, finYear, page, pageSize, sortBy, sortOrder, all, enabled = true } = {}) => {
+  const isExplicitPagination = page !== undefined || pageSize !== undefined;
+  const resolvedAll = all !== undefined ? all : !isExplicitPagination;
   return useQuery({
-    queryKey: ['transaction', 'proforma-invoices', { search, status, finYear }],
-    queryFn: () => transactionApi.getProformaInvoices({ search, status, finYear }),
+    queryKey: ['transaction', 'proforma-invoices', { search, status, finYear, page, pageSize, sortBy, sortOrder, all: resolvedAll }],
+    queryFn: () => transactionApi.getProformaInvoices({ search, status, finYear, page, pageSize, sortBy, sortOrder, all: resolvedAll }),
     enabled,
     staleTime: 10000,
   });
@@ -436,10 +464,12 @@ export const useDownloadProformaInvoiceExcel = () => {
 };
 
 // Delivery Challans
-export const useDeliveryChallans = ({ search = '', returnType, finYear, enabled = true } = {}) => {
+export const useDeliveryChallans = ({ search = '', returnType, finYear, page, pageSize, sortBy, sortOrder, all, enabled = true } = {}) => {
+  const isExplicitPagination = page !== undefined || pageSize !== undefined;
+  const resolvedAll = all !== undefined ? all : !isExplicitPagination;
   return useQuery({
-    queryKey: ['transaction', 'delivery-challans', { search, returnType, finYear }],
-    queryFn: () => transactionApi.getDeliveryChallans({ search, returnType, finYear }),
+    queryKey: ['transaction', 'delivery-challans', { search, returnType, finYear, page, pageSize, sortBy, sortOrder, all: resolvedAll }],
+    queryFn: () => transactionApi.getDeliveryChallans({ search, returnType, finYear, page, pageSize, sortBy, sortOrder, all: resolvedAll }),
     enabled,
     staleTime: 10000,
   });
@@ -470,10 +500,12 @@ export const useDeleteDeliveryChallan = () => {
 };
 
 // Sales Invoices
-export const useSalesInvoices = ({ search = '', status, finYear, enabled = true } = {}) => {
+export const useSalesInvoices = ({ search = '', status, finYear, page, pageSize, sortBy, sortOrder, all, enabled = true } = {}) => {
+  const isExplicitPagination = page !== undefined || pageSize !== undefined;
+  const resolvedAll = all !== undefined ? all : !isExplicitPagination;
   return useQuery({
-    queryKey: ['transaction', 'sales-invoices', { search, status, finYear }],
-    queryFn: () => transactionApi.getSalesInvoices({ search, status, finYear }),
+    queryKey: ['transaction', 'sales-invoices', { search, status, finYear, page, pageSize, sortBy, sortOrder, all: resolvedAll }],
+    queryFn: () => transactionApi.getSalesInvoices({ search, status, finYear, page, pageSize, sortBy, sortOrder, all: resolvedAll }),
     enabled,
     staleTime: 10000,
   });

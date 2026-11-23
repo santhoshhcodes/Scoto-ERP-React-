@@ -18,9 +18,23 @@ export const employeeApi = {
     source = null,
     skip = 0,
     limit = 100,
+    page,
+    pageSize,
+    sortBy,
+    sortOrder,
+    all,
   } = {}) => {
-    const safeLimit = Math.min(Number(limit) || 100, 200);
-    const params = { skip, limit: safeLimit };
+    const params = {};
+    if (page !== undefined) {
+      params.page = page;
+      if (pageSize !== undefined) params.page_size = pageSize;
+    } else {
+      params.skip = skip;
+      params.limit = Math.min(Number(limit) || 100, 200);
+    }
+    if (sortBy) params.sort_by = sortBy;
+    if (sortOrder) params.sort_order = sortOrder;
+    if (all) params.all = true;
     if (search && search.trim()) params.search = search.trim();
     if (is_active !== null && is_active !== undefined) params.is_active = is_active;
     if (source && source.trim() && source !== 'ALL') params.source = source.trim();
@@ -70,11 +84,16 @@ export const useEmployees = ({
   source = null,
   skip = 0,
   limit = 100,
+  page,
+  pageSize,
+  sortBy,
+  sortOrder,
+  all,
   enabled = true,
 } = {}) => {
   return useQuery({
-    queryKey: ['employees', { search, is_active, source, skip, limit }],
-    queryFn: () => employeeApi.getEmployees({ search, is_active, source, skip, limit }),
+    queryKey: ['employees', { search, is_active, source, skip, limit, page, pageSize, sortBy, sortOrder, all }],
+    queryFn: () => employeeApi.getEmployees({ search, is_active, source, skip, limit, page, pageSize, sortBy, sortOrder, all }),
     enabled,
     staleTime: 1000 * 60 * 2, // 2 minutes
   });

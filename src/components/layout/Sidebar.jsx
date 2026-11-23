@@ -29,8 +29,10 @@ import {
   Compass,
   PieChart,
   UploadCloud,
+  KeyRound,
 } from 'lucide-react';
 import scotoLogo from '../../assets/Scoto.png';
+import ChangePasswordModal from './ChangePasswordModal';
 
 const CORE_NAVIGATION = [
   {
@@ -198,6 +200,7 @@ export const Sidebar = ({
   const [isQuotationMenuOpen, setIsQuotationMenuOpen] = useState(isQuotationActive);
   const [isSalesInvMenuOpen, setIsSalesInvMenuOpen] = useState(isSalesInvoiceActive);
   const [isExpenseMenuOpen, setIsExpenseMenuOpen] = useState(isOfficeExpenseActive);
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
 
   // Synchronize open states ONLY when route changes to an active route
   useEffect(() => {
@@ -1042,13 +1045,22 @@ export const Sidebar = ({
                   </div>
                 </div>
               </div>
-              <button
-                onClick={handleLogout}
-                className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-rose-400 transition-colors cursor-pointer"
-                title="Sign Out"
-              >
-                <LogOut className="h-4 w-4" />
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setIsChangePasswordOpen(true)}
+                  className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-indigo-400 transition-colors cursor-pointer"
+                  title="Change Password"
+                >
+                  <KeyRound className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={handleLogout}
+                  className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-rose-400 transition-colors cursor-pointer"
+                  title="Sign Out"
+                >
+                  <LogOut className="h-4 w-4" />
+                </button>
+              </div>
             </div>
           ) : (
             <div className="flex flex-col items-center gap-2">
@@ -1058,6 +1070,13 @@ export const Sidebar = ({
               >
                 {userInitials}
               </div>
+              <button
+                onClick={() => setIsChangePasswordOpen(true)}
+                className="p-2 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-indigo-400 transition-colors cursor-pointer"
+                title="Change Password"
+              >
+                <KeyRound className="h-4 w-4" />
+              </button>
               <button
                 onClick={handleLogout}
                 className="p-2 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-rose-400 transition-colors cursor-pointer"
@@ -1069,6 +1088,12 @@ export const Sidebar = ({
           )}
         </div>
       </aside>
+
+      <ChangePasswordModal
+        isOpen={isChangePasswordOpen}
+        onClose={() => setIsChangePasswordOpen(false)}
+        user={currentUser}
+      />
     </>
   );
 };

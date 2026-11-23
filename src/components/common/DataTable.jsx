@@ -1,5 +1,14 @@
 import React, { useState, useMemo } from 'react';
-import { ChevronLeft, ChevronRight, Inbox, ArrowUpDown, ArrowUp, ArrowDown, AlertCircle, RefreshCw } from 'lucide-react';
+import {
+  ChevronLeft,
+  ChevronRight,
+  Inbox,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  AlertCircle,
+  RefreshCw,
+} from 'lucide-react';
 
 export const DataTable = ({
   columns = [],
@@ -14,16 +23,32 @@ export const DataTable = ({
   enablePagination = true,
   onRowClick,
   className = '',
+  // Server-side pagination & sorting props (optional, fallback to client-side)
+  serverPagination = false,
+  page = 1,
+  totalRecords = 0,
+  totalPages = 1,
+  sortBy = null,
+  sortOrder = 'desc',
+  onPageChange,
+  onPageSizeChange,
+  onSortChange,
+  pageSizeOptions = [10, 20, 50, 100],
 }) => {
-  const [currentPage, setCurrentPage] = useState(1);
-  const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
+  // Client-side state fallback
+  const [clientPage, setClientPage] = useState(1);
+  const [clientSort, setClientSort] = useState({ key: null, direction: 'asc' });
 
-  // Sorting
+  const activePage = serverPagination ? page : clientPage;
+  const activeSortKey = serverPagination ? sortBy : clientSort.key;
+  const activeSortDir = serverPagination ? (sortOrder || 'desc').toLowerCase() : clientSort.direction;
+
+  // Client-side sorting (only used when serverPagination is false)
   const sortedData = useMemo(() => {
-    if (!sortConfig.key) return data;
+    if (serverPagination || !clientSort.key) return data;
     return [...data].sort((a, b) => {
-      const aVal = a[sortConfig.key];
-      const bVal = b[sortConfig.key];
+      const aVal = a[clientSort.key];
+      const bVal = b[clientSort.key];
 
       if (aVal === bVal) return 0;
       if (aVal === null || aVal === undefined) return 1;
@@ -31,34 +56,80 @@ export const DataTable = ({
 
       if (typeof aVal === 'string') {
         const res = aVal.localeCompare(bVal);
-        return sortConfig.direction === 'asc' ? res : -res;
+        return clientSort.direction === 'asc' ? res : -res;
       }
 
-      if (sortConfig.direction === 'asc') {
+      if (clientSort.direction === 'asc') {
         return aVal > bVal ? 1 : -1;
       }
       return aVal < bVal ? 1 : -1;
     });
-  }, [data, sortConfig]);
+  }, [data, clientSort, serverPagination]);
 
-  // Pagination
-  const totalPages = Math.ceil(sortedData.length / pageSize) || 1;
+  // Compute total pages & records
+  const calculatedTotalPages = serverPagination
+    ? Math.max(1, totalPages || Math.ceil((totalRecords || data.length) / pageSize))
+    : Math.max(1, Math.ceil(sortedData.length / pageSize));
+
+  const calculatedTotalRecords = serverPagination
+    ? totalRecords || data.length
+    : sortedData.length;
+
+  // Paginated Data
   const paginatedData = useMemo(() => {
+    if (serverPagination) return data;
     if (!enablePagination) return sortedData;
-    const start = (currentPage - 1) * pageSize;
+    const start = (clientPage - 1) * pageSize;
     return sortedData.slice(start, start + pageSize);
-  }, [sortedData, currentPage, pageSize, enablePagination]);
+  }, [data, sortedData, clientPage, pageSize, enablePagination, serverPagination]);
 
+  // Sort header click handler
   const handleSort = (key, isSortable) => {
     if (!isSortable) return;
-    setSortConfig((prev) => {
-      if (prev.key === key) {
-        if (prev.direction === 'asc') return { key, direction: 'desc' };
-        return { key: null, direction: 'asc' };
+    if (serverPagination) {
+      if (onSortChange) {
+        const nextDir = activeSortKey === key && activeSortDir === 'asc' ? 'desc' : 'asc';
+        onSortChange(key, nextDir);
       }
-      return { key, direction: 'asc' };
-    });
+    } else {
+      setClientSort((prev) => {
+        if (prev.key === key) {
+          if (prev.direction === 'asc') return { key, direction: 'desc' };
+          return { key: null, direction: 'asc' };
+        }
+        return { key, direction: 'asc' };
+      });
+    }
   };
+
+  // Page change handler
+  const handlePageClick = (p) => {
+    if (p < 1 || p > calculatedTotalPages) return;
+    if (serverPagination) {
+      if (onPageChange) onPageChange(p);
+    } else {
+      setClientPage(p);
+    }
+  };
+
+  // Smart page numbers window (with ellipsis)
+  const getPageNumbers = () => {
+    const total = calculatedTotalPages;
+    const current = activePage;
+    if (total <= 7) {
+      return Array.from({ length: total }, (_, i) => i + 1);
+    }
+    if (current <= 4) {
+      return [1, 2, 3, 4, 5, '...', total];
+    }
+    if (current >= total - 3) {
+      return [1, '...', total - 4, total - 3, total - 2, total - 1, total];
+    }
+    return [1, '...', current - 1, current, current + 1, '...', total];
+  };
+
+  const startEntry = calculatedTotalRecords === 0 ? 0 : (activePage - 1) * pageSize + 1;
+  const endEntry = Math.min(activePage * pageSize, calculatedTotalRecords);
 
   return (
     <div className={`overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs ${className}`}>
@@ -68,7 +139,7 @@ export const DataTable = ({
             <tr>
               {columns.map((col, index) => {
                 const isSortable = col.sortable !== false && col.accessorKey;
-                const isSorted = sortConfig.key === col.accessorKey;
+                const isSorted = activeSortKey === col.accessorKey;
                 return (
                   <th
                     key={col.id || col.accessorKey || index}
@@ -91,7 +162,7 @@ export const DataTable = ({
                       {isSortable && (
                         <span className="text-slate-400">
                           {isSorted ? (
-                            sortConfig.direction === 'asc' ? (
+                            activeSortDir === 'asc' ? (
                               <ArrowUp className="h-3.5 w-3.5 text-indigo-600" />
                             ) : (
                               <ArrowDown className="h-3.5 w-3.5 text-indigo-600" />
@@ -164,7 +235,7 @@ export const DataTable = ({
               // Data Rows
               paginatedData.map((row, rowIdx) => (
                 <tr
-                  key={row.id || `row-${rowIdx}`}
+                  key={row.id || row.TransNo || row.ItemCode || row.LedgerCode || row.EmployeeId || `row-${rowIdx}`}
                   onClick={() => onRowClick && onRowClick(row)}
                   className={`transition-colors hover:bg-slate-50/80 ${
                     onRowClick ? 'cursor-pointer' : ''
@@ -196,51 +267,66 @@ export const DataTable = ({
       </div>
 
       {/* Pagination Controls */}
-      {enablePagination && !isLoading && !isError && sortedData.length > 0 && (
+      {enablePagination && !isLoading && !isError && calculatedTotalRecords > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-4 border-t border-slate-200 bg-slate-50/50 px-4 py-3 text-xs text-slate-600">
-          <div className="text-slate-500">
-            Showing{' '}
-            <span className="font-semibold text-slate-700">
-              {(currentPage - 1) * pageSize + 1}
-            </span>{' '}
-            to{' '}
-            <span className="font-semibold text-slate-700">
-              {Math.min(currentPage * pageSize, sortedData.length)}
-            </span>{' '}
-            of{' '}
-            <span className="font-semibold text-slate-700">
-              {sortedData.length}
-            </span>{' '}
-            entries
+          <div className="flex items-center gap-4 text-slate-500">
+            <div>
+              Showing <span className="font-semibold text-slate-700">{startEntry}</span> to{' '}
+              <span className="font-semibold text-slate-700">{endEntry}</span> of{' '}
+              <span className="font-semibold text-slate-700">{calculatedTotalRecords}</span> entries
+            </div>
+
+            {onPageSizeChange && (
+              <div className="hidden sm:flex items-center gap-1.5 pl-2 border-l border-slate-200">
+                <span>Per page:</span>
+                <select
+                  value={pageSize}
+                  onChange={(e) => onPageSizeChange(Number(e.target.value))}
+                  className="rounded-md border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer shadow-2xs"
+                >
+                  {pageSizeOptions.map((opt) => (
+                    <option key={opt} value={opt}>
+                      {opt}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-1.5">
             <button
-              onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
-              disabled={currentPage === 1}
+              onClick={() => handlePageClick(activePage - 1)}
+              disabled={activePage === 1}
               className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-600 shadow-xs hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <ChevronLeft className="h-3.5 w-3.5" />
               Previous
             </button>
-            <div className="flex items-center gap-1 px-2">
-              {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
-                <button
-                  key={page}
-                  onClick={() => setCurrentPage(page)}
-                  className={`h-7 w-7 rounded text-xs font-medium transition-colors ${
-                    currentPage === page
-                      ? 'bg-indigo-600 font-semibold text-white'
-                      : 'text-slate-600 hover:bg-slate-200'
-                  }`}
-                >
-                  {page}
-                </button>
-              ))}
+            <div className="flex items-center gap-1 px-1">
+              {getPageNumbers().map((p, idx) =>
+                p === '...' ? (
+                  <span key={`ellipsis-${idx}`} className="px-1 text-slate-400">
+                    ...
+                  </span>
+                ) : (
+                  <button
+                    key={p}
+                    onClick={() => handlePageClick(p)}
+                    className={`h-7 w-7 rounded text-xs font-medium transition-colors ${
+                      activePage === p
+                        ? 'bg-indigo-600 font-semibold text-white'
+                        : 'text-slate-600 hover:bg-slate-200 cursor-pointer'
+                    }`}
+                  >
+                    {p}
+                  </button>
+                )
+              )}
             </div>
             <button
-              onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
-              disabled={currentPage === totalPages}
+              onClick={() => handlePageClick(activePage + 1)}
+              disabled={activePage === calculatedTotalPages}
               className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-600 shadow-xs hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
             >
               Next

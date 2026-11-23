@@ -23,7 +23,8 @@ import {
   useUpdateDeliveryChallan,
   useDeleteDeliveryChallan,
 } from '../../../api/transactionApi';
-import { useSortableData, SortableHeader } from '../../../utils/sortUtils';
+import { SortableHeader } from '../../../utils/sortUtils';
+import { PaginationBar } from '../../../components/common/PaginationBar';
 import { useFinancialYear } from '../../../context/FinancialYearContext';
 
 export const DeliveryChallanPage = () => {
@@ -32,6 +33,10 @@ export const DeliveryChallanPage = () => {
   const [editingDeliveryNo, setEditingDeliveryNo] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [notification, setNotification] = useState(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [sortKey, setSortKey] = useState('Deliverydate');
+  const [sortDir, setSortDir] = useState('desc');
 
   const {
     data: challanRes,
@@ -39,7 +44,14 @@ export const DeliveryChallanPage = () => {
     isFetching,
     error: fetchError,
     refetch,
-  } = useDeliveryChallans({ search: searchQuery, finYear: selectedFinYear });
+  } = useDeliveryChallans({
+    search: searchQuery,
+    finYear: selectedFinYear,
+    page,
+    pageSize,
+    sortBy: sortKey,
+    sortOrder: sortDir,
+  });
 
   const { data: masterItemsRes } = useMasterItems();
   const { data: masterLedgersRes } = useMasterLedgers();
@@ -49,11 +61,18 @@ export const DeliveryChallanPage = () => {
   const deleteChallanMutation = useDeleteDeliveryChallan();
 
   const challans = challanRes?.data ?? [];
-  const {
-    sortedItems: sortedChallans,
-    sortConfig,
-    requestSort,
-  } = useSortableData(challans, { key: 'Deliverydate', direction: 'desc' });
+  const totalRecords = challanRes?.pagination?.total_records ?? challanRes?.total ?? challans.length;
+  const totalPages = challanRes?.pagination?.total_pages ?? Math.max(1, Math.ceil(totalRecords / pageSize));
+
+  const handleRequestSort = (key) => {
+    if (sortKey === key) {
+      setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir('asc');
+    }
+    setPage(1);
+  };
   const availableItems = masterItemsRes?.data ?? [];
   const availableLedgers = masterLedgersRes?.data ?? [];
 
@@ -538,10 +557,16 @@ export const DeliveryChallanPage = () => {
             <input
               type="text"
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setPage(1);
+              }}
               placeholder="Search Challan No, Customer, PO..."
               className="w-full pl-8.5 pr-3 py-1.5 text-xs rounded-lg bg-slate-50 border border-slate-200"
             />
+          </div>
+          <div className="text-xs text-slate-500 font-medium">
+            Showing <strong className="text-slate-900">{totalRecords}</strong> challans
           </div>
         </div>
 
@@ -551,48 +576,48 @@ export const DeliveryChallanPage = () => {
               <tr>
                 <SortableHeader
                   sortKey="Deliveryno"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   className="px-4 py-3"
                 >
                   Challan No
                 </SortableHeader>
                 <SortableHeader
                   sortKey="Deliverydate"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   className="px-4 py-3"
                 >
                   Date
                 </SortableHeader>
                 <SortableHeader
                   sortKey="Returntype"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   className="px-4 py-3"
                 >
                   Return Type
                 </SortableHeader>
                 <SortableHeader
                   sortKey="Suppliername"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   className="px-4 py-3"
                 >
                   Customer / Supplier
                 </SortableHeader>
                 <SortableHeader
                   sortKey="Deliverymode"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   className="px-4 py-3"
                 >
                   Delivery Mode
                 </SortableHeader>
                 <SortableHeader
                   sortKey="Supplier_ref_no"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   className="px-4 py-3"
                 >
                   Ref No
@@ -631,7 +656,7 @@ export const DeliveryChallanPage = () => {
                   </td>
                 </tr>
               ) : (
-                sortedChallans.map((c) => (
+                challans.map((c) => (
                   <tr key={c.Deliveryno} className="hover:bg-slate-50/70">
                     <td className="px-4 py-3 font-mono font-bold text-indigo-700">{c.Deliveryno}</td>
                     <td className="px-4 py-3 text-slate-600">{c.Deliverydate}</td>
@@ -671,6 +696,22 @@ export const DeliveryChallanPage = () => {
             </tbody>
           </table>
         </div>
+
+        {/* Footer with Enterprise PaginationBar */}
+        <PaginationBar
+          page={page}
+          pageSize={pageSize}
+          totalRecords={totalRecords}
+          totalPages={totalPages}
+          onPageChange={(newPage) => setPage(newPage)}
+          onPageSizeChange={(newSize) => {
+            setPageSize(newSize);
+            setPage(1);
+          }}
+          pageSizeOptions={[10, 20, 50, 100]}
+          itemLabel="challans"
+          isLoading={isFetching}
+        />
       </div>
     </div>
   );

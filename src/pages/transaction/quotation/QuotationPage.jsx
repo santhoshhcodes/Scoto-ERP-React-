@@ -36,7 +36,8 @@ import {
   useDownloadQuotationExcel,
 } from '../../../api/transactionApi';
 import { useMasterItems, useMasterLedgers } from '../../../api/masterApi';
-import { useSortableData, SortableHeader } from '../../../utils/sortUtils';
+import { SortableHeader } from '../../../utils/sortUtils';
+import { PaginationBar } from '../../../components/common/PaginationBar';
 import { DocumentActionDropdown } from '../../../components/common/DocumentActionDropdown';
 import { DocumentPrintModal } from '../../../components/common/DocumentPrintModal';
 import { QuotationRevisionModal } from './QuotationRevisionModal';
@@ -73,15 +74,26 @@ export const QuotationPage = () => {
   const [editingTransNo, setEditingTransNo] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [notification, setNotification] = useState(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [sortKey, setSortKey] = useState('TransDate');
+  const [sortDir, setSortDir] = useState('desc');
 
-  // TanStack Query Hooks
+  // TanStack Query Hooks with server-side pagination & sorting
   const {
     data: quotationResponse,
     isLoading,
     isFetching,
     error: fetchError,
     refetch,
-  } = useQuotations({ search: searchQuery, finYear: selectedFinYear });
+  } = useQuotations({
+    search: searchQuery,
+    finYear: selectedFinYear,
+    page,
+    pageSize,
+    sortBy: sortKey,
+    sortOrder: sortDir,
+  });
 
   const { data: masterItemsRes } = useMasterItems();
   const { data: masterLedgersRes } = useMasterLedgers();
@@ -168,16 +180,23 @@ export const QuotationPage = () => {
   };
 
   const quotations = quotationResponse?.data ?? [];
-  const {
-    sortedItems: sortedQuotations,
-    sortConfig,
-    requestSort,
-  } = useSortableData(quotations, { key: 'TransDate', direction: 'desc' });
+  const totalRecords = quotationResponse?.pagination?.total_records ?? quotationResponse?.total ?? quotations.length;
+  const totalPages = quotationResponse?.pagination?.total_pages ?? Math.max(1, Math.ceil(totalRecords / pageSize));
+
+  const handleRequestSort = (key) => {
+    if (sortKey === key) {
+      setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir('asc');
+    }
+    setPage(1);
+  };
 
   const isApproved = (val) => String(val ?? '').trim() === '1' || String(val ?? '').trim().toLowerCase() === 'approved';
 
   // Summary Metrics
-  const totalQuotations = quotations.length;
+  const totalQuotations = totalRecords;
   const approvedQuotations = quotations.filter((q) => isApproved(q.ApprovalStatus)).length;
   const pendingQuotations = quotations.filter((q) => !isApproved(q.ApprovalStatus)).length;
   const totalValue = quotations.reduce((acc, q) => acc + Number(q.FinalNetAmount || 0), 0);
@@ -1113,14 +1132,17 @@ export const QuotationPage = () => {
             <input
               type="text"
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setPage(1);
+              }}
               placeholder="Search by TransNo, Customer, Narration..."
               className="w-full pl-9 pr-3.5 py-2 text-xs rounded-xl bg-white border border-slate-200 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
             />
           </div>
 
           <div className="text-xs text-slate-500 font-medium">
-            Showing <strong className="text-slate-900">{quotations.length}</strong> quotations
+            Showing <strong className="text-slate-900">{totalRecords}</strong> quotations
           </div>
         </div>
 
@@ -1132,40 +1154,40 @@ export const QuotationPage = () => {
                 <th className="px-4 py-3.5">SL_No</th>
                 <SortableHeader
                   sortKey="TransNo"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   className="px-4 py-3.5"
                 >
                   TransNo
                 </SortableHeader>
                 <SortableHeader
                   sortKey="TransDate"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   className="px-4 py-3.5"
                 >
                   TransDate
                 </SortableHeader>
                 <SortableHeader
                   sortKey="CustomerName"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   className="px-4 py-3.5"
                 >
                   Customer Name
                 </SortableHeader>
                 <SortableHeader
                   sortKey="Narration"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   className="px-4 py-3.5"
                 >
                   Remarks / Narration
                 </SortableHeader>
                 <SortableHeader
                   sortKey="FinalNetAmount"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   align="right"
                   className="px-4 py-3.5 text-right"
                 >
@@ -1173,8 +1195,8 @@ export const QuotationPage = () => {
                 </SortableHeader>
                 <SortableHeader
                   sortKey="ApprovalStatus"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   align="center"
                   className="px-4 py-3.5 text-center"
                 >
@@ -1214,9 +1236,11 @@ export const QuotationPage = () => {
                   </td>
                 </tr>
               ) : (
-                sortedQuotations.map((quo, index) => (
+                quotations.map((quo, index) => (
                   <tr key={quo.TransNo} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="px-4 py-3 font-mono text-slate-400 font-semibold">{index + 1}</td>
+                    <td className="px-4 py-3 font-mono text-slate-400 font-semibold">
+                      {(page - 1) * pageSize + index + 1}
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="font-mono font-bold text-indigo-600">{quo.TransNo}</span>
@@ -1326,6 +1350,22 @@ export const QuotationPage = () => {
             </tbody>
           </table>
         </div>
+
+        {/* Footer with Enterprise PaginationBar */}
+        <PaginationBar
+          page={page}
+          pageSize={pageSize}
+          totalRecords={totalRecords}
+          totalPages={totalPages}
+          onPageChange={(newPage) => setPage(newPage)}
+          onPageSizeChange={(newSize) => {
+            setPageSize(newSize);
+            setPage(1);
+          }}
+          pageSizeOptions={[10, 20, 50, 100]}
+          itemLabel="quotations"
+          isLoading={isFetching}
+        />
       </div>
 
       {/* Universal A4 Document Print Modal */}

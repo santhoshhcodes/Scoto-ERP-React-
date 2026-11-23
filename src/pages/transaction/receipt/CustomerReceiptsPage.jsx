@@ -19,6 +19,7 @@ import {
   Wallet,
 } from 'lucide-react';
 import { StatCard } from '../../../components/common';
+import { PaginationBar } from '../../../components/common/PaginationBar';
 import { useCustomerReceipts } from '../../../api/receiptApi';
 import { useFinancialYear } from '../../../context/FinancialYearContext';
 import ReceiptDetailsModal from './ReceiptDetailsModal';
@@ -26,10 +27,10 @@ import ReceiptDetailsModal from './ReceiptDetailsModal';
 export const CustomerReceiptsPage = () => {
   const navigate = useNavigate();
   const { selectedFinYear, setSelectedFinYear, availableYears } = useFinancialYear();
-  // Filters
+  // Filters & Pagination
   const [search, setSearch] = useState('');
-  const [limit, setLimit] = useState(50);
-  const [offset, setOffset] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
 
   // Modals
   const [selectedTransNo, setSelectedTransNo] = useState(null);
@@ -38,12 +39,13 @@ export const CustomerReceiptsPage = () => {
   const { data: receiptsData, isLoading, refetch } = useCustomerReceipts({
     search,
     finYear: selectedFinYear,
-    limit,
-    offset,
+    page,
+    pageSize,
   });
 
-  const items = receiptsData?.items || [];
-  const totalCount = receiptsData?.total || 0;
+  const items = receiptsData?.items || receiptsData?.data || [];
+  const totalCount = receiptsData?.pagination?.total_records ?? receiptsData?.total ?? items.length;
+  const totalPages = receiptsData?.pagination?.total_pages ?? Math.max(1, Math.ceil(totalCount / pageSize));
 
   // Summary Metrics
   const summaryMetrics = useMemo(() => {
@@ -141,7 +143,10 @@ export const CustomerReceiptsPage = () => {
             type="text"
             placeholder="Search voucher, customer, UTR, remarks..."
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
             className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 text-xs rounded-lg text-slate-900 focus:outline-hidden focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
           />
         </div>
@@ -152,7 +157,10 @@ export const CustomerReceiptsPage = () => {
             <span className="text-xs font-semibold text-slate-500 whitespace-nowrap">FY:</span>
             <select
               value={selectedFinYear}
-              onChange={(e) => setSelectedFinYear(e.target.value)}
+              onChange={(e) => {
+                setSelectedFinYear(e.target.value);
+                setPage(1);
+              }}
               className="px-3 py-1.5 bg-slate-50 border border-slate-200 text-xs rounded-lg font-medium text-slate-700 focus:outline-hidden focus:bg-white cursor-pointer"
             >
               {availableYears.map((y) => (
@@ -168,6 +176,7 @@ export const CustomerReceiptsPage = () => {
               onClick={() => {
                 setSearch('');
                 setSelectedFinYear('ALL');
+                setPage(1);
               }}
               className="text-xs text-rose-600 hover:text-rose-700 font-semibold cursor-pointer"
             >
@@ -305,6 +314,22 @@ export const CustomerReceiptsPage = () => {
             </tbody>
           </table>
         </div>
+
+        {/* Footer with Enterprise PaginationBar */}
+        <PaginationBar
+          page={page}
+          pageSize={pageSize}
+          totalRecords={totalCount}
+          totalPages={totalPages}
+          onPageChange={(newPage) => setPage(newPage)}
+          onPageSizeChange={(newSize) => {
+            setPageSize(newSize);
+            setPage(1);
+          }}
+          pageSizeOptions={[10, 20, 50, 100]}
+          itemLabel="receipts"
+          isLoading={isLoading}
+        />
       </div>
 
       {/* Receipt Details Modal */}

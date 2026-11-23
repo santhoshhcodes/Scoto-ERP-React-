@@ -37,7 +37,8 @@ import {
   transactionApi,
 } from '../../../api/transactionApi';
 import { useMasterItems, useMasterLedgers } from '../../../api/masterApi';
-import { useSortableData, SortableHeader } from '../../../utils/sortUtils';
+import { SortableHeader } from '../../../utils/sortUtils';
+import { PaginationBar } from '../../../components/common/PaginationBar';
 import { DocumentActionDropdown } from '../../../components/common/DocumentActionDropdown';
 import { DocumentPrintModal } from '../../../components/common/DocumentPrintModal';
 import { useFinancialYear } from '../../../context/FinancialYearContext';
@@ -72,15 +73,26 @@ export const SalesInvoicePage = () => {
   const [editingTransNo, setEditingTransNo] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [notification, setNotification] = useState(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [sortKey, setSortKey] = useState('TransDate');
+  const [sortDir, setSortDir] = useState('desc');
 
-  // TanStack Query Hooks
+  // TanStack Query Hooks with server-side pagination & sorting
   const {
     data: invoiceResponse,
     isLoading,
     isFetching,
     error: fetchError,
     refetch,
-  } = useSalesInvoices({ search: searchQuery, finYear: selectedFinYear });
+  } = useSalesInvoices({
+    search: searchQuery,
+    finYear: selectedFinYear,
+    page,
+    pageSize,
+    sortBy: sortKey,
+    sortOrder: sortDir,
+  });
 
   const { data: masterItemsRes } = useMasterItems();
   const { data: masterLedgersRes } = useMasterLedgers();
@@ -213,14 +225,21 @@ export const SalesInvoicePage = () => {
   const [currentSerial, setCurrentSerial] = useState(INITIAL_SERIAL_ROW);
 
   const invoices = invoiceResponse?.data ?? [];
-  const {
-    sortedItems: sortedInvoices,
-    sortConfig,
-    requestSort,
-  } = useSortableData(invoices, { key: 'TransDate', direction: 'desc' });
+  const totalRecords = invoiceResponse?.pagination?.total_records ?? invoiceResponse?.total ?? invoices.length;
+  const totalPages = invoiceResponse?.pagination?.total_pages ?? Math.max(1, Math.ceil(totalRecords / pageSize));
+
+  const handleRequestSort = (key) => {
+    if (sortKey === key) {
+      setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir('asc');
+    }
+    setPage(1);
+  };
 
   // Metrics
-  const totalInvoices = invoices.length;
+  const totalInvoices = totalRecords;
   const approvedInvoices = invoices.filter((i) => i.ApprovalStatus === 'Approved').length;
   const pendingInvoices = invoices.filter((i) => i.ApprovalStatus === 'Pending').length;
   const totalInvoicedValue = invoices.reduce((acc, i) => acc + Number(i.FinalNetAmount || 0), 0);
@@ -1250,14 +1269,17 @@ export const SalesInvoicePage = () => {
             <input
               type="text"
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setPage(1);
+              }}
               placeholder="Search by TransNo, InvoiceNo, Customer..."
               className="w-full pl-9 pr-3.5 py-2 text-xs rounded-xl bg-white border border-slate-200 text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
             />
           </div>
 
           <div className="text-xs text-slate-500 font-medium">
-            Showing <strong className="text-slate-900">{invoices.length}</strong> invoices
+            Showing <strong className="text-slate-900">{totalRecords}</strong> invoices
           </div>
         </div>
 
@@ -1269,56 +1291,56 @@ export const SalesInvoicePage = () => {
                 <th className="px-4 py-3.5">SL_No</th>
                 <SortableHeader
                   sortKey="TransNo"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   className="px-4 py-3.5"
                 >
                   TransNo
                 </SortableHeader>
                 <SortableHeader
                   sortKey="TransDate"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   className="px-4 py-3.5"
                 >
                   TransDate
                 </SortableHeader>
                 <SortableHeader
                   sortKey="InvoiceNo"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   className="px-4 py-3.5"
                 >
                   Invoice No
                 </SortableHeader>
                 <SortableHeader
                   sortKey="InvoiceDate"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   className="px-4 py-3.5"
                 >
                   Invoice Date
                 </SortableHeader>
                 <SortableHeader
                   sortKey="CustomerName"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   className="px-4 py-3.5"
                 >
                   Customer Name
                 </SortableHeader>
                 <SortableHeader
                   sortKey="Remarks"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   className="px-4 py-3.5"
                 >
                   Remarks
                 </SortableHeader>
                 <SortableHeader
                   sortKey="FinalNetAmount"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   align="right"
                   className="px-4 py-3.5 text-right"
                 >
@@ -1326,8 +1348,8 @@ export const SalesInvoicePage = () => {
                 </SortableHeader>
                 <SortableHeader
                   sortKey="ApprovalStatus"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   align="center"
                   className="px-4 py-3.5 text-center"
                 >
@@ -1368,9 +1390,11 @@ export const SalesInvoicePage = () => {
                   </td>
                 </tr>
               ) : (
-                sortedInvoices.map((inv, index) => (
+                invoices.map((inv, index) => (
                   <tr key={inv.TransNo} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="px-4 py-3 font-mono text-slate-400 font-semibold">{index + 1}</td>
+                    <td className="px-4 py-3 font-mono text-slate-400 font-semibold">
+                      {(page - 1) * pageSize + index + 1}
+                    </td>
                     <td className="px-4 py-3 font-mono font-bold text-emerald-700">{inv.TransNo}</td>
                     <td className="px-4 py-3 text-slate-600">{inv.TransDate}</td>
                     <td className="px-4 py-3 font-mono font-bold text-slate-900">{inv.InvoiceNo}</td>
@@ -1462,6 +1486,22 @@ export const SalesInvoicePage = () => {
             </tbody>
           </table>
         </div>
+
+        {/* Footer with Enterprise PaginationBar */}
+        <PaginationBar
+          page={page}
+          pageSize={pageSize}
+          totalRecords={totalRecords}
+          totalPages={totalPages}
+          onPageChange={(newPage) => setPage(newPage)}
+          onPageSizeChange={(newSize) => {
+            setPageSize(newSize);
+            setPage(1);
+          }}
+          pageSizeOptions={[10, 20, 50, 100]}
+          itemLabel="invoices"
+          isLoading={isFetching}
+        />
       </div>
 
       {/* Universal A4 Document Print Modal */}

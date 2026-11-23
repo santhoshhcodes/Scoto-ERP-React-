@@ -26,13 +26,14 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import StatCard from '../../../components/common/StatCard';
+import { PaginationBar } from '../../../components/common/PaginationBar';
 import {
   useMasterLedgers,
   useCreateMasterLedger,
   useUpdateMasterLedger,
   useDeleteMasterLedger,
 } from '../../../api/masterApi';
-import { useSortableData, SortableHeader } from '../../../utils/sortUtils';
+import { SortableHeader } from '../../../utils/sortUtils';
 
 const ACCOUNT_HEADERS = ['Assets', 'Liabilities', 'Income', 'Expenses', 'Equity'];
 
@@ -132,10 +133,15 @@ export const LedgerMasterPage = () => {
   const [errorMessage, setErrorMessage] = useState(null);
   const [successMessage, setSuccessMessage] = useState(null);
 
-  // Search
+  // Search & Filter
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedTypeFilter, setSelectedTypeFilter] = useState('ALL'); // 'ALL' | 'Customer' | 'Supplier' | 'General Ledger'
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [sortKey, setSortKey] = useState('LedgerCode');
+  const [sortDir, setSortDir] = useState('desc');
 
-  // TanStack Query Hooks
+  // TanStack Query Hooks with server-side pagination & sorting
   const {
     data: ledgersResponse,
     isLoading,
@@ -144,6 +150,11 @@ export const LedgerMasterPage = () => {
     refetch,
   } = useMasterLedgers({
     search: searchQuery,
+    ledger_type: selectedTypeFilter !== 'ALL' ? selectedTypeFilter : undefined,
+    page,
+    pageSize,
+    sortBy: sortKey,
+    sortOrder: sortDir,
   });
 
   const createLedgerMutation = useCreateMasterLedger();
@@ -152,36 +163,24 @@ export const LedgerMasterPage = () => {
 
   // Real ledgers fetched from MSSQL backend
   const ledgers = ledgersResponse?.data ?? [];
-
-  // Type Filter Tabs
-  const [selectedTypeFilter, setSelectedTypeFilter] = useState('ALL'); // 'ALL' | 'Customer' | 'Supplier' | 'General Ledger'
+  const totalRecords = ledgersResponse?.pagination?.total_records ?? ledgersResponse?.total ?? ledgers.length;
+  const totalPages = ledgersResponse?.pagination?.total_pages ?? Math.max(1, Math.ceil(totalRecords / pageSize));
 
   // Statistics
-  const totalLedgers = ledgers.length;
+  const totalLedgers = totalRecords;
   const customerCount = ledgers.filter((l) => l.LedgerType === 'Customer').length;
   const supplierCount = ledgers.filter((l) => l.LedgerType === 'Supplier').length;
   const glCount = ledgers.filter((l) => l.LedgerType === 'General Ledger').length;
 
-  // Filtered List (by selected type and search query)
-  const filteredLedgers = ledgers.filter((ledger) => {
-    const matchesType =
-      selectedTypeFilter === 'ALL' || ledger.LedgerType === selectedTypeFilter;
-
-    const matchesSearch =
-      ledger.LedgerName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      ledger.LedgerCode?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      ledger.AccGroupName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (ledger.GSTNo && ledger.GSTNo.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (ledger.City && ledger.City.toLowerCase().includes(searchQuery.toLowerCase()));
-
-    return matchesType && matchesSearch;
-  });
-
-  const {
-    sortedItems: sortedFilteredLedgers,
-    sortConfig,
-    requestSort,
-  } = useSortableData(filteredLedgers, { key: 'LedgerCode', direction: 'desc' });
+  const handleRequestSort = (key) => {
+    if (sortKey === key) {
+      setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir('asc');
+    }
+    setPage(1);
+  };
 
   const getNextSequentialCode = (type, existingLedgers = []) => {
     const prefix = type === 'Customer' ? 'CUS' : type === 'General Ledger' ? 'GL' : 'SUP';
@@ -1333,7 +1332,10 @@ export const LedgerMasterPage = () => {
             <button
               key={tab.id}
               type="button"
-              onClick={() => setSelectedTypeFilter(tab.id)}
+              onClick={() => {
+                setSelectedTypeFilter(tab.id);
+                setPage(1);
+              }}
               className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
                 selectedTypeFilter === tab.id
                   ? 'bg-white text-emerald-700 shadow-xs border border-slate-200/80 font-bold'
@@ -1351,7 +1353,10 @@ export const LedgerMasterPage = () => {
           <input
             type="text"
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setPage(1);
+            }}
             placeholder="Search by code, supplier / ledger name, group, GSTIN, city..."
             className="w-full pl-9 pr-4 py-2 text-xs sm:text-sm rounded-lg border border-slate-200 bg-slate-50/50 text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
           />
@@ -1367,48 +1372,48 @@ export const LedgerMasterPage = () => {
                 <th className="py-3.5 px-4 w-12 text-center">S.No</th>
                 <SortableHeader
                   sortKey="LedgerCode"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   className="py-3.5 px-4"
                 >
                   Code
                 </SortableHeader>
                 <SortableHeader
                   sortKey="LedgerName"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   className="py-3.5 px-4"
                 >
                   Supplier / Ledger Name
                 </SortableHeader>
                 <SortableHeader
                   sortKey="BankName"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   className="py-3.5 px-4"
                 >
                   Bank & A/c No
                 </SortableHeader>
                 <SortableHeader
                   sortKey="GSTNo"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   className="py-3.5 px-4"
                 >
                   GSTIN & City
                 </SortableHeader>
                 <SortableHeader
                   sortKey="AccLedgerHeaderName"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   className="py-3.5 px-4"
                 >
                   Header & Group
                 </SortableHeader>
                 <SortableHeader
                   sortKey="OpeningBalance"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   align="right"
                   className="py-3.5 px-4 text-right"
                 >
@@ -1416,8 +1421,8 @@ export const LedgerMasterPage = () => {
                 </SortableHeader>
                 <SortableHeader
                   sortKey="Status"
-                  sortConfig={sortConfig}
-                  onSort={requestSort}
+                  sortConfig={{ key: sortKey, direction: sortDir }}
+                  onSort={handleRequestSort}
                   align="center"
                   className="py-3.5 px-4 text-center"
                 >
@@ -1450,7 +1455,7 @@ export const LedgerMasterPage = () => {
                     </button>
                   </td>
                 </tr>
-              ) : filteredLedgers.length === 0 ? (
+              ) : ledgers.length === 0 ? (
                 <tr>
                   <td colSpan={9} className="py-12 text-center text-slate-400">
                     <BookOpen className="h-8 w-8 mx-auto mb-2 opacity-40 text-slate-400" />
@@ -1461,13 +1466,13 @@ export const LedgerMasterPage = () => {
                   </td>
                 </tr>
               ) : (
-                sortedFilteredLedgers.map((ledger, index) => (
+                ledgers.map((ledger, index) => (
                   <tr
                     key={ledger.LedgerCode || ledger.id || index}
                     className="hover:bg-slate-50/80 transition-colors"
                   >
                     <td className="py-3.5 px-4 text-center font-mono text-xs text-slate-400 font-medium">
-                      {index + 1}
+                      {(page - 1) * pageSize + index + 1}
                     </td>
                     <td className="py-3.5 px-4 font-mono font-semibold text-emerald-600">
                       {ledger.LedgerCode}
@@ -1572,15 +1577,21 @@ export const LedgerMasterPage = () => {
           </table>
         </div>
 
-        {/* Footer info bar matching DataTable */}
-        <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50/50 px-4 py-3 text-xs text-slate-600">
-          <div>
-            Showing <span className="font-semibold text-slate-700">{filteredLedgers.length}</span> entries
-          </div>
-          <div className="text-slate-400 text-xs font-medium">
-            General Ledger Master
-          </div>
-        </div>
+        {/* Footer with Enterprise PaginationBar */}
+        <PaginationBar
+          page={page}
+          pageSize={pageSize}
+          totalRecords={totalRecords}
+          totalPages={totalPages}
+          onPageChange={(newPage) => setPage(newPage)}
+          onPageSizeChange={(newSize) => {
+            setPageSize(newSize);
+            setPage(1);
+          }}
+          pageSizeOptions={[10, 20, 50, 100]}
+          itemLabel="ledgers"
+          isLoading={isFetching}
+        />
       </div>
       </div>
     </div>

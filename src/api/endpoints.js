@@ -16,6 +16,13 @@ export const API_ENDPOINTS = {
   AUTH: {
     LOGIN: '/auth/login',
     META: '/auth/meta',
+    FORGOT_PASSWORD: '/auth/forgot-password',
+    VERIFY_OTP: '/auth/verify-otp',
+    RESET_PASSWORD: '/auth/reset-password',
+    ACTIVATE_ACCOUNT: '/auth/activate-account',
+    VERIFY_DEVICE_OTP: '/auth/verify-device-otp',
+    CHANGE_PASSWORD: '/auth/change-password',
+    FIRST_TIME_ACTIVATE: '/auth/first-time-activate',
   },
 
   ATTENDANCE: {

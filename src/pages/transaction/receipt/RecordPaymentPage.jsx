@@ -75,6 +75,18 @@ export const RecordPaymentPage = () => {
   // Refs for scrolling to missing fields
   const customerSectionRef = useRef(null);
   const amountSectionRef = useRef(null);
+  const customerDropdownRef = useRef(null);
+
+  // Close customer dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (customerDropdownRef.current && !customerDropdownRef.current.contains(event.target)) {
+        setIsCustomerDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Queries
   const { data: clientsData, isLoading: isLoadingClients } = useCustomerClients(customerSearch);
@@ -633,11 +645,6 @@ export const RecordPaymentPage = () => {
                 Select Customer / Client <span className="text-rose-500">*</span>
               </h2>
             </div>
-            {selectedCustomer && (
-              <span className="text-xs bg-emerald-50 text-emerald-700 px-2.5 py-0.5 rounded-full font-semibold border border-emerald-200">
-                Customer Connected
-              </span>
-            )}
           </div>
 
           {fieldErrors.customer && (
@@ -648,21 +655,21 @@ export const RecordPaymentPage = () => {
           )}
 
           {selectedCustomer ? (
-            <div className="p-4 bg-slate-50/80 rounded-xl border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="flex items-center gap-3.5">
-                <div className="p-3 bg-emerald-600 text-white rounded-xl shadow-2xs">
-                  <Building2 className="w-6 h-6" />
+            <div className="p-3.5 bg-slate-50/90 rounded-xl border border-slate-200 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="p-2 bg-emerald-600 text-white rounded-lg shrink-0 shadow-2xs">
+                  <Building2 className="w-4 h-4" />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <h3 className="text-base font-bold text-slate-900">{customerName}</h3>
+                    <h3 className="text-sm font-bold text-slate-900 truncate">{customerName}</h3>
                     {(selectedCustomer?.CustomerUnit || dossierData?.customer_info?.CustomerUnit) && (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 shrink-0">
                         {selectedCustomer?.CustomerUnit || dossierData?.customer_info?.CustomerUnit}
                       </span>
                     )}
                   </div>
-                  <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 mt-0.5">
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 mt-0.5">
                     <span>
                       Ledger Code: <strong className="font-mono text-slate-700">{customerCode}</strong>
                     </span>
@@ -682,32 +689,20 @@ export const RecordPaymentPage = () => {
                 </div>
               </div>
 
-              {/* Financial Snapshot Badges */}
-              <div className="flex items-center gap-4">
-                <div className="text-right">
-                  <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                    Total Balance Due
-                  </div>
-                  <div className="text-base font-extrabold text-rose-600">
-                    ₹{(openDocs?.outstanding_balance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedCustomer(null);
-                    setSelectedDoc(null);
-                    setCustomerSearch('');
-                  }}
-                  className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-rose-600 hover:bg-rose-50 border border-slate-200 rounded-lg transition-colors cursor-pointer"
-                >
-                  Change Customer
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedCustomer(null);
+                  setSelectedDoc(null);
+                  setCustomerSearch('');
+                }}
+                className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-rose-600 hover:bg-rose-50 border border-slate-200 rounded-lg transition-colors cursor-pointer shrink-0"
+              >
+                Change Customer
+              </button>
             </div>
           ) : (
-            <div className="relative max-w-xl">
+            <div ref={customerDropdownRef} className="relative max-w-xl">
               <div className="relative">
                 <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                 <input
@@ -740,7 +735,7 @@ export const RecordPaymentPage = () => {
                           setCustomerSearch(client.LedgerName || client.name);
                           setFieldErrors((prev) => ({ ...prev, customer: false }));
                         }}
-                        className="w-full text-left px-4 py-2.5 text-xs hover:bg-emerald-50/80 transition-colors flex items-center justify-between group cursor-pointer"
+                        className="w-full text-left px-4 py-2 text-xs hover:bg-emerald-50/80 transition-colors flex items-center justify-between group cursor-pointer"
                       >
                         <div>
                           <div className="flex items-center gap-2">
@@ -759,9 +754,6 @@ export const RecordPaymentPage = () => {
                             {client.GSTNo && <span>• GST: {client.GSTNo}</span>}
                           </div>
                         </div>
-                        <span className="text-[10px] uppercase font-bold text-slate-400 group-hover:text-emerald-600">
-                          Select
-                        </span>
                       </button>
                     ))
                   ) : (

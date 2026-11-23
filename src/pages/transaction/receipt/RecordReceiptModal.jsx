@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   X,
   CreditCard,
@@ -36,6 +36,18 @@ export const RecordReceiptModal = ({
   const [customerSearch, setCustomerSearch] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [isCustomerDropdownOpen, setIsCustomerDropdownOpen] = useState(false);
+  const customerDropdownRef = useRef(null);
+
+  // Close customer dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (customerDropdownRef.current && !customerDropdownRef.current.contains(event.target)) {
+        setIsCustomerDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Form Fields
   const [receiptType, setReceiptType] = useState('Invoice Settlement');
@@ -321,7 +333,7 @@ export const RecordReceiptModal = ({
                 </button>
               </div>
             ) : (
-              <div className="relative">
+              <div ref={customerDropdownRef} className="relative">
                 <div className="relative">
                   <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                   <input
@@ -351,7 +363,7 @@ export const RecordReceiptModal = ({
                             setIsCustomerDropdownOpen(false);
                             setCustomerSearch(client.LedgerName || client.name);
                           }}
-                          className="w-full text-left px-4 py-2.5 text-xs hover:bg-emerald-50/80 transition-colors flex items-center justify-between group"
+                          className="w-full text-left px-4 py-2 text-xs hover:bg-emerald-50/80 transition-colors flex items-center justify-between group cursor-pointer"
                         >
                           <div>
                             <span className="font-semibold text-slate-800 group-hover:text-emerald-900">
@@ -361,9 +373,6 @@ export const RecordReceiptModal = ({
                               ({client.LedgerCode || client.code})
                             </span>
                           </div>
-                          <span className="text-[10px] uppercase font-bold text-slate-400 group-hover:text-emerald-600">
-                            Select
-                          </span>
                         </button>
                       ))
                     ) : (

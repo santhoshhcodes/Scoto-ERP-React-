@@ -204,7 +204,7 @@ export const TravelExpensePage = () => {
     fromDate: filterFromDate,
     toDate: filterToDate,
   });
-  const claims = claimsData?.claims || [];
+  const claims = claimsData?.claims || claimsData?.data || claimsData?.items || (Array.isArray(claimsData) ? claimsData : []);
 
   const {
     data: summaryData,
