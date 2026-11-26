@@ -5,3 +5,4 @@ export * from './StatusBadge';
 export * from './FilterBar';
 export * from './ExcelImportModal';
 export * from './PaginationBar';
+export * from './LogoutConfirmModal';

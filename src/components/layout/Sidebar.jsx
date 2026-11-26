@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 import scotoLogo from '../../assets/Scoto.png';
 import ChangePasswordModal from './ChangePasswordModal';
+import { LogoutConfirmModal } from '../common/LogoutConfirmModal';
 
 const CORE_NAVIGATION = [
   {
@@ -201,6 +202,7 @@ export const Sidebar = ({
   const [isSalesInvMenuOpen, setIsSalesInvMenuOpen] = useState(isSalesInvoiceActive);
   const [isExpenseMenuOpen, setIsExpenseMenuOpen] = useState(isOfficeExpenseActive);
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
+  const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
 
   // Synchronize open states ONLY when route changes to an active route
   useEffect(() => {
@@ -1054,7 +1056,7 @@ export const Sidebar = ({
                   <KeyRound className="h-4 w-4" />
                 </button>
                 <button
-                  onClick={handleLogout}
+                  onClick={() => setIsLogoutModalOpen(true)}
                   className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-rose-400 transition-colors cursor-pointer"
                   title="Sign Out"
                 >
@@ -1078,7 +1080,7 @@ export const Sidebar = ({
                 <KeyRound className="h-4 w-4" />
               </button>
               <button
-                onClick={handleLogout}
+                onClick={() => setIsLogoutModalOpen(true)}
                 className="p-2 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-rose-400 transition-colors cursor-pointer"
                 title="Sign Out"
               >
@@ -1093,6 +1095,12 @@ export const Sidebar = ({
         isOpen={isChangePasswordOpen}
         onClose={() => setIsChangePasswordOpen(false)}
         user={currentUser}
+      />
+
+      <LogoutConfirmModal
+        isOpen={isLogoutModalOpen}
+        onClose={() => setIsLogoutModalOpen(false)}
+        onConfirm={handleLogout}
       />
     </>
   );

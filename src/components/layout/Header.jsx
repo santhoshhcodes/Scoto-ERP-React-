@@ -13,6 +13,7 @@ import {
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useBackendHealth } from '../../api/attendanceApi';
 import { useFinancialYear } from '../../context/FinancialYearContext';
+import { LogoutConfirmModal } from '../common/LogoutConfirmModal';
 import scotoLogo from '../../assets/Scoto.png';
 
 export const Header = ({ onToggleSidebar, onMenuClick, isSidebarOpen }) => {
@@ -22,6 +23,7 @@ export const Header = ({ onToggleSidebar, onMenuClick, isSidebarOpen }) => {
   const { refetch: refetchHealth, isFetching: isHealthFetching } = useBackendHealth();
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [syncSuccessToast, setSyncSuccessToast] = useState(false);
+  const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
 
   // Check if current page is in office expense module (which uses natural date ranges, not FY)
   const isOfficeExpensePage =
@@ -209,7 +211,10 @@ export const Header = ({ onToggleSidebar, onMenuClick, isSidebarOpen }) => {
               </div>
 
               <button
-                onClick={handleLogout}
+                onClick={() => {
+                  setShowProfileMenu(false);
+                  setIsLogoutModalOpen(true);
+                }}
                 className="w-full flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
               >
                 <LogOut className="h-4 w-4" />
@@ -219,6 +224,12 @@ export const Header = ({ onToggleSidebar, onMenuClick, isSidebarOpen }) => {
           )}
         </div>
       </div>
+
+      <LogoutConfirmModal
+        isOpen={isLogoutModalOpen}
+        onClose={() => setIsLogoutModalOpen(false)}
+        onConfirm={handleLogout}
+      />
     </header>
   );
 };
