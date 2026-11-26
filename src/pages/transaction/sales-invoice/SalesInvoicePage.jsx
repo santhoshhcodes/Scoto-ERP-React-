@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Receipt,
@@ -127,6 +127,60 @@ export const SalesInvoicePage = () => {
     RoundOff: 0,
   });
 
+  // TransNo real-time existence validation state
+  const [transNoCheckStatus, setTransNoCheckStatus] = useState({
+    checking: false,
+    exists: false,
+    available: false,
+    message: '',
+  });
+  const transNoDebounceRef = useRef(null);
+
+  const checkTransNoAvailability = useCallback(async (transNoVal, excludeNo) => {
+    const trimmed = String(transNoVal || '').trim();
+    if (!trimmed) {
+      setTransNoCheckStatus({ checking: false, exists: false, available: false, message: 'Trans No is required' });
+      return;
+    }
+    setTransNoCheckStatus((prev) => ({ ...prev, checking: true, message: 'Checking database...' }));
+    try {
+      const res = await transactionApi.checkSalesInvoiceNo(trimmed, excludeNo);
+      const isDuplicate = Boolean(res?.data?.exists ?? res?.exists);
+      setTransNoCheckStatus({
+        checking: false,
+        exists: isDuplicate,
+        available: !isDuplicate,
+        message: isDuplicate ? `Trans No "${trimmed}" already exists in database.` : `Trans No "${trimmed}" is available.`,
+      });
+    } catch {
+      setTransNoCheckStatus({ checking: false, exists: false, available: false, message: '' });
+    }
+  }, []);
+
+  const handleTransNoChange = (newVal) => {
+    setFormHeader((prev) => ({ ...prev, TransNo: newVal }));
+    if (transNoDebounceRef.current) clearTimeout(transNoDebounceRef.current);
+    transNoDebounceRef.current = setTimeout(() => {
+      checkTransNoAvailability(newVal, editingTransNo);
+    }, 350);
+  };
+
+  const handleFetchNextTransNo = async (finYearHint) => {
+    const targetFy = finYearHint || selectedFinYear;
+    try {
+      setTransNoCheckStatus({ checking: true, exists: false, available: false, message: 'Fetching next available number...' });
+      const res = await transactionApi.getNextSalesInvoiceNo(targetFy);
+      const nextNo = res?.data?.trans_no || res?.trans_no;
+      if (nextNo) {
+        setFormHeader((prev) => ({ ...prev, TransNo: nextNo }));
+        checkTransNoAvailability(nextNo, editingTransNo);
+      }
+    } catch (err) {
+      console.error(err);
+      setTransNoCheckStatus({ checking: false, exists: false, available: false, message: '' });
+    }
+  };
+
   const handleSelectProforma = async (proformaNo) => {
     if (!proformaNo || proformaNo === '-Select-') return;
     try {
@@ -250,10 +304,10 @@ export const SalesInvoicePage = () => {
     setNotification(null);
     setEditingItemIndex(null);
     setIsInterState(false);
-    const nextNo = generateNextTransactionNo('SI', selectedFinYear, invoices);
+    const fallbackNo = generateNextTransactionNo('SI', selectedFinYear, invoices);
     setFormHeader({
       FinYearVal: getFullFinYear(selectedFinYear),
-      TransNo: nextNo,
+      TransNo: fallbackNo,
       TransDate: new Date().toISOString().split('T')[0],
       InvoiceNo: '',
       InvoiceDate: new Date().toISOString().split('T')[0],
@@ -270,6 +324,9 @@ export const SalesInvoicePage = () => {
     setCurrentRow(INITIAL_ITEM_ROW);
     setCurrentSerial(INITIAL_SERIAL_ROW);
     setViewMode('form');
+
+    // Fetch guaranteed latest sequence number directly from database
+    handleFetchNextTransNo(selectedFinYear);
   };
 
   // Open Edit Form
@@ -277,6 +334,7 @@ export const SalesInvoicePage = () => {
     setEditingTransNo(invoice.TransNo);
     setNotification(null);
     setEditingItemIndex(null);
+    setTransNoCheckStatus({ checking: false, exists: false, available: false, message: '' });
     const hasIgst =
       Number(invoice.TotalIGSTAmount || 0) > 0 ||
       (invoice.Items || []).some((it) => Number(it.IGST || 0) > 0);
@@ -404,6 +462,11 @@ export const SalesInvoicePage = () => {
     e.preventDefault();
     if (gridItems.length === 0) {
       alert('Please add at least one line item to the invoice.');
+      return;
+    }
+
+    if (transNoCheckStatus.exists) {
+      alert(`Cannot save: Trans No "${formHeader.TransNo}" already exists in database. Please choose a different number.`);
       return;
     }
 
@@ -565,13 +628,62 @@ export const SalesInvoicePage = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
               {/* TransNo */}
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Trans No</label>
-                <input
-                  type="text"
-                  value={formHeader.TransNo}
-                  readOnly
-                  className="w-full px-3 py-2 text-xs rounded-lg bg-slate-100 border border-slate-200 text-slate-900 font-mono font-semibold"
-                />
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-slate-700">
+                    Trans No <span className="text-rose-500">*</span>
+                  </label>
+                  {!editingTransNo && (
+                    <button
+                      type="button"
+                      onClick={() => handleFetchNextTransNo(selectedFinYear)}
+                      className="text-[10px] text-emerald-600 hover:text-emerald-800 font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                      title="Fetch next sequential Trans No from database"
+                    >
+                      <RefreshCw className="h-2.5 w-2.5" />
+                      Auto Next
+                    </button>
+                  )}
+                </div>
+                <div className="relative">
+                  <Hash className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                  <input
+                    type="text"
+                    value={formHeader.TransNo}
+                    onChange={(e) => handleTransNoChange(e.target.value)}
+                    onBlur={() => checkTransNoAvailability(formHeader.TransNo, editingTransNo)}
+                    placeholder="e.g. SI2627-001"
+                    className={`w-full pl-9 pr-9 py-2 text-xs rounded-lg border font-mono font-bold transition-colors ${
+                      transNoCheckStatus.exists
+                        ? 'border-rose-400 bg-rose-50/30 text-rose-900 focus:ring-2 focus:ring-rose-400 focus:border-rose-500'
+                        : transNoCheckStatus.available
+                        ? 'border-emerald-300 bg-emerald-50/20 text-slate-900 focus:ring-2 focus:ring-emerald-400 focus:border-emerald-500'
+                        : 'border-slate-200 bg-white text-slate-900 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500'
+                    }`}
+                    required
+                  />
+                  <div className="absolute right-3 top-2.5">
+                    {transNoCheckStatus.checking ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+                    ) : transNoCheckStatus.exists ? (
+                      <AlertCircle className="h-4 w-4 text-rose-500" />
+                    ) : transNoCheckStatus.available ? (
+                      <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                    ) : null}
+                  </div>
+                </div>
+                {transNoCheckStatus.message && (
+                  <p
+                    className={`text-[11px] mt-1 font-semibold flex items-center gap-1 ${
+                      transNoCheckStatus.exists
+                        ? 'text-rose-600'
+                        : transNoCheckStatus.available
+                        ? 'text-emerald-600'
+                        : 'text-slate-500'
+                    }`}
+                  >
+                    {transNoCheckStatus.message}
+                  </p>
+                )}
               </div>
 
               {/* TransDate */}
@@ -587,11 +699,13 @@ export const SalesInvoicePage = () => {
                     setFormHeader((prev) => {
                       const updated = { ...prev, TransDate: newDate };
                       if (!editingTransNo && selectedFinYear === 'ALL') {
-                        updated.TransNo = generateNextTransactionNo('SI', selectedFinYear, invoices, newDate);
                         updated.FinYearVal = getFullFinYear(selectedFinYear, newDate);
                       }
                       return updated;
                     });
+                    if (!editingTransNo && selectedFinYear === 'ALL') {
+                      handleFetchNextTransNo(getFullFinYear(selectedFinYear, newDate));
+                    }
                   }}
                   className="w-full px-3 py-2 text-xs rounded-lg bg-slate-50 border border-slate-200 text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-500/20"
                   required

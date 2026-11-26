@@ -38,6 +38,45 @@ import {
 } from '../../../api/customerReportApi';
 import { useFinancialYear } from '../../../context/FinancialYearContext';
 
+/**
+ * Computes the 12 chronological financial year months (April Y1 to March Y2)
+ * for an Indian Financial Year (e.g. '2026-2027' -> April 2026 to March 2027).
+ */
+const getFinYearMonths = (fy) => {
+  if (!fy || fy === 'ALL') return [];
+  let y1, y2;
+  const m = String(fy).match(/(\d{4})[-_](\d{4})/);
+  if (m) {
+    y1 = parseInt(m[1], 10);
+    y2 = parseInt(m[2], 10);
+  } else {
+    const m2 = String(fy).match(/(\d{2})[-_](\d{2})/);
+    if (m2) {
+      y1 = 2000 + parseInt(m2[1], 10);
+      y2 = 2000 + parseInt(m2[2], 10);
+    } else {
+      return [];
+    }
+  }
+  const monthNames = [
+    'April', 'May', 'June', 'July', 'August', 'September',
+    'October', 'November', 'December', 'January', 'February', 'March'
+  ];
+  return monthNames.map((name, idx) => {
+    const year = idx < 9 ? y1 : y2;
+    const monthNum = idx < 9 ? idx + 4 : idx - 8;
+    const value = `${year}-${String(monthNum).padStart(2, '0')}`;
+    return {
+      label: `${name} ${year}`,
+      value,
+      name,
+      year,
+      monthNum,
+      index: idx,
+    };
+  });
+};
+
 export const CustomerReportPage = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -47,6 +86,22 @@ export const CustomerReportPage = () => {
   const [selectedClient, setSelectedClient] = useState(null); // { LedgerCode, LedgerName, ... }
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const { selectedFinYear, setSelectedFinYear, availableYears } = useFinancialYear();
+
+  // Financial Year Month Range Filtering State
+  const fyMonths = useMemo(() => getFinYearMonths(selectedFinYear), [selectedFinYear]);
+  const [fromMonth, setFromMonth] = useState('');
+  const [toMonth, setToMonth] = useState('');
+
+  // Automatically sync fromMonth and toMonth to full 12 months whenever financial year changes
+  useEffect(() => {
+    if (fyMonths.length > 0) {
+      setFromMonth(fyMonths[0].value); // April Y1
+      setToMonth(fyMonths[fyMonths.length - 1].value); // March Y2
+    } else {
+      setFromMonth('');
+      setToMonth('');
+    }
+  }, [selectedFinYear, fyMonths]);
 
   // Exactly TWO Clean Reports:
   // 'statement' -> Detailed Statement of Account (Running Ledger with GST & TDS Breakdown)
@@ -129,7 +184,12 @@ export const CustomerReportPage = () => {
     isLoading: isLoadingDossier,
     isFetching: isFetchingDossier,
     refetch: refetchDossier,
-  } = useCustomerDossier(selectedClient?.LedgerCode, selectedFinYear);
+  } = useCustomerDossier(
+    selectedClient?.LedgerCode,
+    selectedFinYear,
+    fromMonth,
+    toMonth
+  );
 
   const dossier = dossierRes?.data || dossierRes;
   const kpis = dossier?.kpis || {};
@@ -137,6 +197,31 @@ export const CustomerReportPage = () => {
   const runningLedger = dossier?.running_ledger || [];
   const invoicesBreakdown = dossier?.invoices_breakdown || [];
   const invoicesSummary = dossier?.invoices_summary || {};
+
+  // Fast invoice status lookup for ledger rows
+  const invoiceStatusMap = useMemo(() => {
+    const map = new Map();
+    for (const inv of invoicesBreakdown) {
+      const tNo = (inv.TransNo || inv.trans_no || '').trim().toLowerCase();
+      const iNo = (inv.InvoiceNo || inv.invoice_no || '').trim().toLowerCase();
+      if (tNo) map.set(tNo, inv);
+      if (iNo) map.set(iNo, inv);
+    }
+    return map;
+  }, [invoicesBreakdown]);
+
+  // Formatted Period Description
+  const currentPeriodLabel = useMemo(() => {
+    if (dossier?.period_display) return dossier.period_display;
+    if (dossier?.period_range) return dossier.period_range;
+    if (!selectedFinYear || selectedFinYear === 'ALL') return 'All Financial Years';
+    if (fyMonths.length > 0) {
+      const start = fyMonths.find((m) => m.value === fromMonth)?.label || 'April';
+      const end = fyMonths.find((m) => m.value === toMonth)?.label || 'March';
+      return `${start} to ${end}`;
+    }
+    return `FY ${selectedFinYear}`;
+  }, [dossier?.period_display, dossier?.period_range, selectedFinYear, fyMonths, fromMonth, toMonth]);
 
   // Filtered Invoices (for Executive Summary Report)
   const filteredInvoices = useMemo(() => {
@@ -248,6 +333,8 @@ export const CustomerReportPage = () => {
         clientCode: selectedClient.LedgerCode,
         finYear: selectedFinYear,
         tab: 'ALL',
+        fromMonth,
+        toMonth,
       });
     } catch (err) {
       console.error('Failed to export Customer Dossier Excel:', err);
@@ -307,6 +394,56 @@ export const CustomerReportPage = () => {
                 ))}
               </select>
             </div>
+
+            {/* Month Range Selectors (When FY has months) */}
+            {fyMonths.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5 bg-slate-100/90 rounded-lg p-1 border border-slate-200">
+                <span className="text-[11px] font-semibold text-slate-600 ml-1.5">From:</span>
+                <select
+                  value={fromMonth}
+                  onChange={(e) => setFromMonth(e.target.value)}
+                  className="bg-transparent text-xs font-bold text-slate-800 pr-2 py-1 outline-none cursor-pointer"
+                  title="Select Start Month"
+                >
+                  {fyMonths.map((m) => (
+                    <option key={`from-${m.value}`} value={m.value}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+
+                <span className="text-slate-400 text-xs">→</span>
+
+                <span className="text-[11px] font-semibold text-slate-600">To:</span>
+                <select
+                  value={toMonth}
+                  onChange={(e) => setToMonth(e.target.value)}
+                  className="bg-transparent text-xs font-bold text-slate-800 pr-2 py-1 outline-none cursor-pointer"
+                  title="Select End Month"
+                >
+                  {fyMonths.map((m) => (
+                    <option key={`to-${m.value}`} value={m.value}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+
+                {/* Reset to Full Year (12 Months) if custom range selected */}
+                {(fromMonth !== fyMonths[0].value || toMonth !== fyMonths[fyMonths.length - 1].value) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFromMonth(fyMonths[0].value);
+                      setToMonth(fyMonths[fyMonths.length - 1].value);
+                    }}
+                    className="ml-1 px-2 py-0.5 text-[10px] font-bold rounded bg-indigo-100 text-indigo-700 hover:bg-indigo-200 transition-colors cursor-pointer"
+                    title="Reset to full 12-month Financial Year"
+                  >
+                    Full FY (12M)
+                  </button>
+                )}
+              </div>
+            )}
 
             {/* Refresh Button */}
             <button
@@ -594,6 +731,39 @@ export const CustomerReportPage = () => {
       {/* ========================================================================= */}
       {selectedClient && (
         <div className="space-y-6">
+          {/* Prominent Financial Period Top Banner */}
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-gradient-to-r from-indigo-50 via-purple-50 to-indigo-50 border border-indigo-200/90 rounded-xl px-4 py-3 shadow-2xs">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center shadow-xs shrink-0">
+                <Calendar className="w-4 h-4" />
+              </div>
+              <div>
+                <span className="text-[10px] font-bold text-indigo-900 uppercase tracking-wider block">
+                  Report Financial Period
+                </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-base font-black text-indigo-950 font-sans tracking-tight">
+                    {dossier?.period_range || currentPeriodLabel}
+                  </span>
+                  {selectedFinYear !== 'ALL' && (
+                    <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">
+                      FY {selectedFinYear}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-slate-600 bg-white/90 border border-indigo-100 px-3 py-1 rounded-lg shadow-2xs font-medium">
+                Period Filter:{' '}
+                <span className="font-bold text-indigo-900">
+                  {dossier?.period_display || currentPeriodLabel}
+                </span>
+              </span>
+            </div>
+          </div>
+
           {/* Customer Master Dossier Profile Card (Client KYC Only - Issuing company removed from screen) */}
           <div className="bg-white rounded-xl shadow-xs border border-slate-200/80 p-5">
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -870,6 +1040,14 @@ export const CustomerReportPage = () => {
                       <tbody className="divide-y divide-slate-100 bg-white font-mono text-[11px]">
                         {filteredLedger.map((row, idx) => {
                           const bal = Number(row.running_balance) || 0;
+                          const matchedInv = row.voucher_type === 'Sales Invoice' && row.voucher_no
+                            ? invoiceStatusMap.get(String(row.voucher_no).trim().toLowerCase())
+                            : null;
+                          const isInvPaid = matchedInv
+                            ? (matchedInv.payment_status === 'PAID' || Number(matchedInv.balance_due) <= 0.01)
+                            : false;
+                          const invBalDue = matchedInv ? Number(matchedInv.balance_due || 0) : Number(row.debit || 0);
+
                           return (
                             <tr
                               key={idx}
@@ -896,7 +1074,7 @@ export const CustomerReportPage = () => {
                               <td className="px-3 py-2.5 text-center font-semibold text-slate-900">
                                 <div className="flex items-center justify-center gap-1.5">
                                   <span>{row.voucher_no || '-'}</span>
-                                  {row.voucher_type === 'Sales Invoice' && Number(row.debit) > 0 && (
+                                  {row.voucher_type === 'Sales Invoice' && Number(row.debit) > 0 && !isInvPaid && invBalDue > 0.01 && (
                                     <button
                                       type="button"
                                       onClick={() => {
@@ -905,16 +1083,24 @@ export const CustomerReportPage = () => {
                                           customerName: selectedClient.LedgerName,
                                           docType: 'SALES_INVOICE',
                                           docNo: row.voucher_no,
-                                          amount: String(row.debit || ''),
+                                          amount: String(invBalDue || row.debit || ''),
                                         });
                                         navigate(`/transaction/receipts/new?${params.toString()}`);
                                       }}
                                       className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800 transition-colors cursor-pointer text-[10px] font-bold border border-emerald-200"
-                                      title={`Record Receipt / Payment for ${row.voucher_no}`}
+                                      title={`Record Receipt / Payment for ${row.voucher_no} (Due: ₹${invBalDue.toLocaleString('en-IN')})`}
                                     >
                                       <CreditCard className="w-2.5 h-2.5" />
                                       <span>Pay</span>
                                     </button>
+                                  )}
+                                  {row.voucher_type === 'Sales Invoice' && isInvPaid && (
+                                    <span
+                                      className="inline-flex items-center px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[10px] font-bold border border-emerald-200"
+                                      title="This invoice is fully paid / settled"
+                                    >
+                                      Paid
+                                    </span>
                                   )}
                                 </div>
                               </td>

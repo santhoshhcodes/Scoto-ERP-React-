@@ -54,6 +54,18 @@ export const transactionApi = {
     return await apiClient.delete(API_ENDPOINTS.TRANSACTION.QUOTATION_BY_NO(transNo));
   },
 
+  getNextQuotationNo: async (finYear) => {
+    const params = {};
+    if (finYear && finYear !== 'ALL') params.fin_year = finYear;
+    return await apiClient.get(API_ENDPOINTS.TRANSACTION.QUOTATION_NEXT_NO, { params });
+  },
+
+  checkQuotationNo: async (transNo, excludeTransNo) => {
+    const params = { trans_no: transNo };
+    if (excludeTransNo) params.exclude_trans_no = excludeTransNo;
+    return await apiClient.get(API_ENDPOINTS.TRANSACTION.QUOTATION_CHECK_NO, { params });
+  },
+
   downloadQuotationExcel: async (transNo) => {
     const response = await apiClient.get(
       API_ENDPOINTS.TRANSACTION.QUOTATION_EXPORT_EXCEL(transNo),
@@ -115,6 +127,18 @@ export const transactionApi = {
 
   deleteProformaInvoice: async (transNo) => {
     return await apiClient.delete(API_ENDPOINTS.TRANSACTION.PROFORMA_INVOICE_BY_NO(transNo));
+  },
+
+  getNextProformaNo: async (finYear) => {
+    const params = {};
+    if (finYear && finYear !== 'ALL') params.fin_year = finYear;
+    return await apiClient.get(API_ENDPOINTS.TRANSACTION.PROFORMA_INVOICE_NEXT_NO, { params });
+  },
+
+  checkProformaNo: async (transNo, excludeTransNo) => {
+    const params = { trans_no: transNo };
+    if (excludeTransNo) params.exclude_trans_no = excludeTransNo;
+    return await apiClient.get(API_ENDPOINTS.TRANSACTION.PROFORMA_INVOICE_CHECK_NO, { params });
   },
 
   downloadProformaInvoiceExcel: async (transNo) => {
@@ -211,6 +235,18 @@ export const transactionApi = {
 
   deleteSalesInvoice: async (transNo) => {
     return await apiClient.delete(API_ENDPOINTS.TRANSACTION.SALES_INVOICE_BY_NO(transNo));
+  },
+
+  getNextSalesInvoiceNo: async (finYear) => {
+    const params = {};
+    if (finYear && finYear !== 'ALL') params.fin_year = finYear;
+    return await apiClient.get(API_ENDPOINTS.TRANSACTION.SALES_INVOICE_NEXT_NO, { params });
+  },
+
+  checkSalesInvoiceNo: async (transNo, excludeTransNo) => {
+    const params = { trans_no: transNo };
+    if (excludeTransNo) params.exclude_trans_no = excludeTransNo;
+    return await apiClient.get(API_ENDPOINTS.TRANSACTION.SALES_INVOICE_CHECK_NO, { params });
   },
 
   downloadSalesInvoiceExcel: async (transNo) => {
@@ -404,6 +440,15 @@ export const useReviseQuotation = () => {
   });
 };
 
+export const useNextQuotationNo = (finYear, { enabled = true } = {}) => {
+  return useQuery({
+    queryKey: ['transaction', 'quotation-next-no', finYear],
+    queryFn: () => transactionApi.getNextQuotationNo(finYear),
+    enabled,
+    staleTime: 0,
+  });
+};
+
 // Proforma Invoices
 export const useProformaInvoices = ({ search = '', status, finYear, page, pageSize, sortBy, sortOrder, all, enabled = true } = {}) => {
   const isExplicitPagination = page !== undefined || pageSize !== undefined;
@@ -460,6 +505,15 @@ export const useDeleteProformaInvoice = () => {
 export const useDownloadProformaInvoiceExcel = () => {
   return useMutation({
     mutationFn: ({ transNo }) => transactionApi.downloadProformaInvoiceExcel(transNo),
+  });
+};
+
+export const useNextProformaNo = (finYear, { enabled = true } = {}) => {
+  return useQuery({
+    queryKey: ['transaction', 'proforma-next-no', finYear],
+    queryFn: () => transactionApi.getNextProformaNo(finYear),
+    enabled,
+    staleTime: 0,
   });
 };
 
@@ -568,6 +622,15 @@ export const useDeleteSalesInvoice = () => {
 export const useDownloadSalesInvoiceExcel = () => {
   return useMutation({
     mutationFn: ({ transNo }) => transactionApi.downloadSalesInvoiceExcel(transNo),
+  });
+};
+
+export const useNextSalesInvoiceNo = (finYear, { enabled = true } = {}) => {
+  return useQuery({
+    queryKey: ['transaction', 'sales-invoice-next-no', finYear],
+    queryFn: () => transactionApi.getNextSalesInvoiceNo(finYear),
+    enabled,
+    staleTime: 0,
   });
 };
 

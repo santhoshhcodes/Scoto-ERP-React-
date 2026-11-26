@@ -104,13 +104,22 @@ export const RecordReceiptModal = ({
       }
 
       if (initialDocument) {
-        setSelectedDoc(initialDocument);
-        if (initialDocument.doc_type === 'SALES_INVOICE') {
-          setReceiptType('Invoice Settlement');
-          setGrossAmount(String(initialDocument.balance_due || initialDocument.total_amount || ''));
-        } else if (initialDocument.doc_type === 'PROFORMA' || initialDocument.doc_type === 'QUOTATION') {
-          setReceiptType('Advance against Quotation / Proforma');
-          setGrossAmount(String(initialDocument.balance_pending || initialDocument.total_amount || ''));
+        const isPaid = initialDocument.payment_status === 'PAID' ||
+          (initialDocument.doc_type === 'SALES_INVOICE' && initialDocument.balance_due !== undefined && Number(initialDocument.balance_due) <= 0.01) ||
+          (initialDocument.doc_type !== 'SALES_INVOICE' && initialDocument.balance_pending !== undefined && Number(initialDocument.balance_pending) <= 0.01);
+
+        if (isPaid) {
+          setSelectedDoc(null);
+          setGrossAmount('');
+        } else {
+          setSelectedDoc(initialDocument);
+          if (initialDocument.doc_type === 'SALES_INVOICE') {
+            setReceiptType('Invoice Settlement');
+            setGrossAmount(String(Number(initialDocument.balance_due) > 0 ? initialDocument.balance_due : ''));
+          } else if (initialDocument.doc_type === 'PROFORMA' || initialDocument.doc_type === 'QUOTATION') {
+            setReceiptType('Advance against Quotation / Proforma');
+            setGrossAmount(String(Number(initialDocument.balance_pending) > 0 ? initialDocument.balance_pending : ''));
+          }
         }
       } else {
         setSelectedDoc(null);
@@ -163,14 +172,23 @@ export const RecordReceiptModal = ({
 
   // Handle Document Selection
   const handleSelectDoc = (doc) => {
+    const isPaid = doc.payment_status === 'PAID' ||
+      (doc.doc_type === 'SALES_INVOICE' && doc.balance_due !== undefined && Number(doc.balance_due) <= 0.01) ||
+      (doc.doc_type !== 'SALES_INVOICE' && doc.balance_pending !== undefined && Number(doc.balance_pending) <= 0.01);
+
+    if (isPaid) {
+      alert(`Document ${doc.trans_no || doc.invoice_no} is already fully paid (₹0.00 balance due). It cannot be selected for payment.`);
+      return;
+    }
+
     setSelectedDoc(doc);
     if (doc.doc_type === 'SALES_INVOICE') {
-      const due = doc.balance_due !== undefined ? doc.balance_due : doc.total_amount;
-      setGrossAmount(String(due > 0 ? due : doc.total_amount));
+      const due = doc.balance_due !== undefined ? Number(doc.balance_due) : Number(doc.total_amount);
+      setGrossAmount(String(due > 0 ? due : ''));
       setRemarks(`Payment received for invoice ${doc.trans_no || doc.invoice_no}`);
     } else {
-      const pending = doc.balance_pending !== undefined ? doc.balance_pending : doc.total_amount;
-      setGrossAmount(String(pending > 0 ? pending : doc.total_amount));
+      const pending = doc.balance_pending !== undefined ? Number(doc.balance_pending) : Number(doc.total_amount);
+      setGrossAmount(String(pending > 0 ? pending : ''));
       setRemarks(`Advance payment for ${doc.trans_no || doc.doc_type}`);
     }
   };
@@ -189,6 +207,26 @@ export const RecordReceiptModal = ({
     if (isNaN(gross) || gross <= 0) {
       alert('Please enter a valid Gross Settlement Amount greater than 0.');
       return;
+    }
+
+    if (selectedDoc) {
+      const isPaid = selectedDoc.payment_status === 'PAID' ||
+        (selectedDoc.doc_type === 'SALES_INVOICE' && selectedDoc.balance_due !== undefined && Number(selectedDoc.balance_due) <= 0.01) ||
+        (selectedDoc.doc_type !== 'SALES_INVOICE' && selectedDoc.balance_pending !== undefined && Number(selectedDoc.balance_pending) <= 0.01);
+
+      if (isPaid) {
+        alert(`Document ${selectedDoc.trans_no || selectedDoc.invoice_no} is already fully paid. Duplicate receipts are not allowed.`);
+        return;
+      }
+
+      const balDue = selectedDoc.doc_type === 'SALES_INVOICE'
+        ? (selectedDoc.balance_due !== undefined ? Number(selectedDoc.balance_due) : Number(selectedDoc.total_amount))
+        : (selectedDoc.balance_pending !== undefined ? Number(selectedDoc.balance_pending) : Number(selectedDoc.total_amount));
+
+      if (gross > (balDue + 0.05)) {
+        alert(`Gross Settlement Amount (₹${gross.toLocaleString('en-IN')}) cannot exceed remaining balance due (₹${balDue.toLocaleString('en-IN')}).`);
+        return;
+      }
     }
 
     const selectedAcc = accountList.find((a) => a.code === depositGLCode);
@@ -445,16 +483,23 @@ export const RecordReceiptModal = ({
                       <div className="max-h-48 overflow-y-auto divide-y divide-slate-100">
                         {openDocs?.invoices && openDocs.invoices.length > 0 ? (
                           openDocs.invoices.map((inv) => {
+                            const isPaid = inv.payment_status === 'PAID' || (inv.balance_due !== undefined && Number(inv.balance_due) <= 0.01);
                             const isSelected =
+                              !isPaid &&
                               selectedDoc &&
                               (selectedDoc.trans_no === inv.trans_no || selectedDoc.invoice_no === inv.invoice_no);
                             return (
                               <div
                                 key={inv.trans_no || inv.invoice_no}
-                                onClick={() => handleSelectDoc(inv)}
-                                className={`p-3 text-xs flex items-center justify-between cursor-pointer transition-colors ${
-                                  isSelected ? 'bg-emerald-50/80 font-medium' : 'hover:bg-slate-50'
+                                onClick={() => !isPaid && handleSelectDoc(inv)}
+                                className={`p-3 text-xs flex items-center justify-between transition-colors ${
+                                  isPaid
+                                    ? 'opacity-60 bg-slate-50 cursor-not-allowed select-none'
+                                    : isSelected
+                                    ? 'bg-emerald-50/80 font-medium cursor-pointer'
+                                    : 'hover:bg-slate-50 cursor-pointer'
                                 }`}
+                                title={isPaid ? 'This invoice is already fully paid' : ''}
                               >
                                 <div className="space-y-0.5">
                                   <div className="flex items-center gap-2">
@@ -464,14 +509,14 @@ export const RecordReceiptModal = ({
                                     )}
                                     <span
                                       className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                                        inv.payment_status === 'PAID'
+                                        isPaid || inv.payment_status === 'PAID'
                                           ? 'bg-emerald-100 text-emerald-800'
                                           : inv.payment_status === 'PARTIAL'
                                           ? 'bg-amber-100 text-amber-800'
                                           : 'bg-rose-100 text-rose-800'
                                       }`}
                                     >
-                                      {inv.payment_status}
+                                      {isPaid ? 'PAID' : inv.payment_status}
                                     </span>
                                   </div>
                                   <div className="text-[11px] text-slate-400">Date: {inv.invoice_date || 'N/A'}</div>

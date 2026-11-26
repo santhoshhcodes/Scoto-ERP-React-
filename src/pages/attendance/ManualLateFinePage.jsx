@@ -15,6 +15,8 @@ import {
   XCircle,
   HelpCircle,
   X,
+  Sun,
+  Moon,
 } from 'lucide-react';
 import { StatCard, StatusBadge, Modal } from '../../components/common';
 import { exportDailyLateFinesExcel, exportMonthlyLateFinesExcel, exportToExcel, formatMinutesToHM } from '../../utils/excelUtils';
@@ -77,6 +79,7 @@ export const ManualLateFinePage = () => {
 
   // Fine Edit Modal State
   const [selectedFineRecord, setSelectedFineRecord] = useState(null);
+  const [fineModalTab, setFineModalTab] = useState('morning'); // 'morning' | 'evening'
   const [permissionMinutesInput, setPermissionMinutesInput] = useState('0');
   const [earlyPermissionMinutesInput, setEarlyPermissionMinutesInput] = useState('0');
   const [assignedCheckoutInput, setAssignedCheckoutInput] = useState('19:30');
@@ -266,6 +269,7 @@ export const ManualLateFinePage = () => {
       setFineAmountInput(record.fine_amount ? String(record.fine_amount) : '100');
       setFineStatusInput(record.fine_status === 'WAIVED' ? 'WAIVED' : 'CONFIRMED');
     }
+    setFineModalTab(late === 0 && early > 0 ? 'evening' : 'morning');
     setFineReasonInput(record.fine_reason || record.review_reason || '');
     setModalError('');
   };
@@ -1072,227 +1076,316 @@ export const ManualLateFinePage = () => {
               </div>
             )}
 
-            {/* 2-Phase Grid: Morning (Late Arrival) & Evening (Early Exit & Closing Timing) */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Card 1: Morning Check-In & Late Arrival */}
-              <div className="rounded-xl border border-teal-200 bg-teal-50/30 p-3.5 space-y-3">
-                <div className="flex items-center justify-between border-b border-teal-100 pb-2">
-                  <span className="font-bold text-teal-950 flex items-center gap-1.5">
-                    <Clock className="h-4 w-4 text-teal-600" />
-                    1. Morning Check-In & Late Arrival
-                  </span>
-                  <span className="text-[10px] text-teal-700 font-medium">Shift Start: 09:30 AM</span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 bg-white rounded-lg p-2.5 border border-teal-100">
-                  <div>
-                    <span className="text-[10px] text-slate-500 block">Actual Check-IN</span>
-                    <span className="font-mono font-bold text-slate-800 text-[13px]">
-                      {selectedFineRecord.first_in ? formatTimeOnly(selectedFineRecord.first_in) : 'Not Punched'}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-slate-500 block">Effective Late Delay</span>
-                    {(() => {
-                      if (!selectedFineRecord.first_in) {
-                        return <span className="font-mono font-medium text-slate-400">0 mins (No Punch)</span>;
-                      }
-                      const lateMins = computeLateMinutes(selectedFineRecord.first_in, permissionMinutesInput);
-                      if (lateMins === 0) {
-                        return <span className="font-mono font-bold text-teal-700">0m (On Time / Permitted)</span>;
-                      }
-                      return <span className="font-mono font-bold text-rose-700">{formatMinutesToHM(lateMins)} late</span>;
-                    })()}
-                  </div>
-                </div>
-
-                {/* Late Permission Offset */}
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="font-semibold text-teal-900 text-[11px]">Late Permission Offset</label>
-                    <span className="text-[10px] text-teal-700">From 09:30 (no grace)</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <input
-                      type="number"
-                      min="0"
-                      max="240"
-                      step="15"
-                      value={permissionMinutesInput}
-                      onChange={(e) => handleLatePermissionChange(e.target.value)}
-                      placeholder="0"
-                      className="w-20 rounded-md border border-teal-300 bg-white px-2 py-1 text-xs font-mono font-semibold text-slate-900 focus:outline-none focus:border-teal-500"
-                    />
-                    <div className="flex flex-wrap gap-1">
-                      {[
-                        { label: 'None', mins: 0 },
-                        { label: '+30m', mins: 30 },
-                        { label: '+45m', mins: 45 },
-                        { label: '+1h', mins: 60 },
-                        { label: '+2h', mins: 120 },
-                      ].map((chip) => (
-                        <button
-                          key={chip.mins}
-                          type="button"
-                          onClick={() => handleLatePermissionChange(String(chip.mins))}
-                          className={`px-1.5 py-1 rounded text-[10px] font-semibold border cursor-pointer transition-colors ${
-                            Number(permissionMinutesInput) === chip.mins
-                              ? 'bg-teal-600 border-teal-600 text-white'
-                              : 'bg-white border-teal-200 text-teal-800 hover:bg-teal-50'
-                          }`}
-                        >
-                          {chip.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  {Number(permissionMinutesInput) > 0 ? (
-                    <p className="text-[10px] text-teal-800 font-medium mt-1">
-                      Permission: Must check in by{' '}
-                      <strong>
-                        {(() => {
-                          const d = new Date(`2000-01-01T09:30:00`);
-                          d.setMinutes(d.getMinutes() + Number(permissionMinutesInput));
-                          return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
-                        })()}
-                      </strong> (09:30 AM + {permissionMinutesInput}m permission, grace does not apply)
-                    </p>
-                  ) : (
-                    <p className="text-[10px] text-slate-500 mt-1">
-                      Cutoff: <strong>09:40 AM</strong> (09:30 AM + 10m grace). Late calculated from 09:40 AM.
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              {/* Card 2: Evening Departure & Early Exit */}
-              <div className="rounded-xl border border-indigo-200 bg-indigo-50/30 p-3.5 space-y-3">
-                <div className="flex items-center justify-between border-b border-indigo-100 pb-2">
-                  <span className="font-bold text-indigo-950 flex items-center gap-1.5">
-                    <Clock className="h-4 w-4 text-indigo-600" />
-                    2. Evening Departure & Early Exit
-                  </span>
-                  <span className="text-[10px] text-indigo-700 font-medium">Configured Individually</span>
-                </div>
-
-                {/* Assigned Closing Time Switcher */}
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="font-semibold text-slate-800 text-[11px]">Assigned Office Closing</label>
-                    <span className="text-[10px] text-indigo-700">Per-employee schedule</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => handleAssignedCheckoutChange('19:30')}
-                      className={`flex-1 py-1 px-2 rounded-md text-[11px] font-semibold border cursor-pointer transition-colors ${
-                        assignedCheckoutInput === '19:30'
-                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
-                          : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                      }`}
-                    >
-                      07:30 PM (Regular)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleAssignedCheckoutChange('18:45')}
-                      className={`flex-1 py-1 px-2 rounded-md text-[11px] font-semibold border cursor-pointer transition-colors ${
-                        assignedCheckoutInput === '18:45'
-                          ? 'bg-purple-600 text-white border-purple-600 shadow-2xs'
-                          : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                      }`}
-                    >
-                      06:45 PM (Designated)
-                    </button>
-                    <input
-                      type="time"
-                      value={assignedCheckoutInput}
-                      onChange={(e) => handleAssignedCheckoutChange(e.target.value)}
-                      className="w-20 rounded-md border border-indigo-200 bg-white px-1.5 py-1 text-xs font-mono font-semibold text-slate-900 focus:outline-none focus:border-indigo-500"
-                      title="Custom shift closing time"
-                    />
-                  </div>
-                </div>
-
-                {/* Punch Out & Early Exit Display */}
-                <div className="grid grid-cols-2 gap-2 bg-white rounded-lg p-2.5 border border-indigo-100">
-                  <div>
-                    <span className="text-[10px] text-slate-500 block">Actual Check-OUT</span>
-                    <span className="font-mono font-bold text-slate-800 text-[13px]">
-                      {selectedFineRecord.last_out ? formatTimeOnly(selectedFineRecord.last_out) : 'Not Punched'}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-slate-500 block">Early Exit Duration</span>
-                    {(() => {
-                      if (!selectedFineRecord.last_out) {
-                        return <span className="font-mono font-medium text-slate-400">0 mins (No Punch)</span>;
-                      }
-                      const earlyInfo = computeEarlyExit(selectedFineRecord.last_out, assignedCheckoutInput, earlyPermissionMinutesInput);
-                      if (!earlyInfo.isEarly || earlyInfo.earlyMinutes === 0) {
-                        return <span className="font-mono font-bold text-emerald-700">0m (On Time / Permitted)</span>;
-                      }
+            {/* 2-Phase Session Tabs: Morning (Late Arrival) & Evening (Early Exit & Closing Timing) */}
+            <div className="space-y-3">
+              {/* Tab Navigation */}
+              <div className="flex border-b border-slate-200 gap-2 bg-slate-50/80 p-1 rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => setFineModalTab('morning')}
+                  className={`flex-1 py-2 px-3 text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                    fineModalTab === 'morning'
+                      ? 'bg-white text-teal-950 shadow-xs border border-teal-200'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
+                  }`}
+                >
+                  <Sun className={`h-4 w-4 ${fineModalTab === 'morning' ? 'text-teal-600' : 'text-slate-400'}`} />
+                  <span>Morning Check-In</span>
+                  {(() => {
+                    if (!selectedFineRecord.first_in) {
+                      return <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-500">No Punch</span>;
+                    }
+                    const lateMins = computeLateMinutes(selectedFineRecord.first_in, permissionMinutesInput);
+                    if (lateMins > 0) {
                       return (
-                        <span className="font-mono font-bold text-rose-700">
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-800">
+                          {formatMinutesToHM(lateMins)} late
+                        </span>
+                      );
+                    }
+                    return (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-teal-100 text-teal-800">
+                        On Time
+                      </span>
+                    );
+                  })()}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setFineModalTab('evening')}
+                  className={`flex-1 py-2 px-3 text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                    fineModalTab === 'evening'
+                      ? 'bg-white text-indigo-950 shadow-xs border border-indigo-200'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
+                  }`}
+                >
+                  <Moon className={`h-4 w-4 ${fineModalTab === 'evening' ? 'text-indigo-600' : 'text-slate-400'}`} />
+                  <span>Evening Departure</span>
+                  {(() => {
+                    if (!selectedFineRecord.last_out) {
+                      return <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-500">No Punch</span>;
+                    }
+                    const earlyInfo = computeEarlyExit(selectedFineRecord.last_out, assignedCheckoutInput, earlyPermissionMinutesInput);
+                    if (earlyInfo.isEarly && earlyInfo.earlyMinutes > 0) {
+                      return (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-800">
                           {formatMinutesToHM(earlyInfo.earlyMinutes)} early
                         </span>
                       );
-                    })()}
-                  </div>
-                </div>
+                    }
+                    return (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-100 text-indigo-800">
+                        On Time
+                      </span>
+                    );
+                  })()}
+                </button>
+              </div>
 
-                {/* Early Permission Offset */}
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="font-semibold text-indigo-950 text-[11px]">Early Exit Permission</label>
-                    <span className="text-[10px] text-indigo-700">Allowed departure adjustment</span>
+              {/* Tab 1 Content: Morning Check-In & Late Arrival */}
+              {fineModalTab === 'morning' && (
+                <div className="rounded-xl border border-teal-200 bg-teal-50/30 p-3.5 space-y-3 animate-in fade-in duration-150">
+                  <div className="flex items-center justify-between border-b border-teal-100 pb-2">
+                    <span className="font-bold text-teal-950 flex items-center gap-1.5">
+                      <Sun className="h-4 w-4 text-teal-600" />
+                      Morning Check-In & Late Arrival
+                    </span>
+                    <span className="text-[10px] text-teal-700 font-medium">Shift Start: 09:30 AM</span>
                   </div>
-                  <div className="flex items-center gap-1.5">
-                    <input
-                      type="number"
-                      min="0"
-                      max="240"
-                      step="15"
-                      value={earlyPermissionMinutesInput}
-                      onChange={(e) => handleEarlyPermissionChange(e.target.value)}
-                      placeholder="0"
-                      className="w-20 rounded-md border border-indigo-300 bg-white px-2 py-1 text-xs font-mono font-semibold text-slate-900 focus:outline-none focus:border-indigo-500"
-                    />
-                    <div className="flex flex-wrap gap-1">
-                      {[
-                        { label: 'None', mins: 0 },
-                        { label: '+15m', mins: 15 },
-                        { label: '+30m', mins: 30 },
-                        { label: '+45m', mins: 45 },
-                        { label: '+1h', mins: 60 },
-                        { label: '+2h', mins: 120 },
-                      ].map((chip) => (
-                        <button
-                          key={chip.mins}
-                          type="button"
-                          onClick={() => handleEarlyPermissionChange(String(chip.mins))}
-                          className={`px-1.5 py-1 rounded text-[10px] font-semibold border cursor-pointer transition-colors ${
-                            Number(earlyPermissionMinutesInput) === chip.mins
-                              ? 'bg-indigo-600 border-indigo-600 text-white'
-                              : 'bg-white border-indigo-200 text-indigo-800 hover:bg-indigo-50'
-                          }`}
-                        >
-                          {chip.label}
-                        </button>
-                      ))}
+
+                  <div className="grid grid-cols-2 gap-2 bg-white rounded-lg p-2.5 border border-teal-100">
+                    <div>
+                      <span className="text-[10px] text-slate-500 block">Actual Check-IN</span>
+                      <span className="font-mono font-bold text-slate-800 text-[13px]">
+                        {selectedFineRecord.first_in ? formatTimeOnly(selectedFineRecord.first_in) : 'Not Punched'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-500 block">Effective Late Delay</span>
+                      {(() => {
+                        if (!selectedFineRecord.first_in) {
+                          return <span className="font-mono font-medium text-slate-400">0 mins (No Punch)</span>;
+                        }
+                        const lateMins = computeLateMinutes(selectedFineRecord.first_in, permissionMinutesInput);
+                        if (lateMins === 0) {
+                          return <span className="font-mono font-bold text-teal-700">0m (On Time / Permitted)</span>;
+                        }
+                        return <span className="font-mono font-bold text-rose-700">{formatMinutesToHM(lateMins)} late</span>;
+                      })()}
                     </div>
                   </div>
-                  <p className="text-[10px] text-indigo-900 font-medium mt-1">
-                    {Number(earlyPermissionMinutesInput) > 0 ? (
-                      <span>
-                        Allowed exit from <strong>{computeEarlyExit(selectedFineRecord.last_out || new Date(), assignedCheckoutInput, earlyPermissionMinutesInput).allowedExitStr}</strong> (06:30 PM office closing minus {earlyPermissionMinutesInput}m permission)
-                      </span>
+
+                  {/* Late Permission Offset */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="font-semibold text-teal-900 text-[11px]">Late Permission Offset</label>
+                      <span className="text-[10px] text-teal-700">From 09:30 (no grace)</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="number"
+                        min="0"
+                        max="240"
+                        step="15"
+                        value={permissionMinutesInput}
+                        onChange={(e) => handleLatePermissionChange(e.target.value)}
+                        placeholder="0"
+                        className="w-20 rounded-md border border-teal-300 bg-white px-2 py-1 text-xs font-mono font-semibold text-slate-900 focus:outline-none focus:border-teal-500"
+                      />
+                      <div className="flex flex-wrap gap-1">
+                        {[
+                          { label: 'None', mins: 0 },
+                          { label: '+30m', mins: 30 },
+                          { label: '+45m', mins: 45 },
+                          { label: '+1h', mins: 60 },
+                          { label: '+2h', mins: 120 },
+                        ].map((chip) => (
+                          <button
+                            key={chip.mins}
+                            type="button"
+                            onClick={() => handleLatePermissionChange(String(chip.mins))}
+                            className={`px-1.5 py-1 rounded text-[10px] font-semibold border cursor-pointer transition-colors ${
+                              Number(permissionMinutesInput) === chip.mins
+                                ? 'bg-teal-600 border-teal-600 text-white'
+                                : 'bg-white border-teal-200 text-teal-800 hover:bg-teal-50'
+                            }`}
+                          >
+                            {chip.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    {Number(permissionMinutesInput) > 0 ? (
+                      <p className="text-[10px] text-teal-800 font-medium mt-1">
+                        Permission: Must check in by{' '}
+                        <strong>
+                          {(() => {
+                            const d = new Date(`2000-01-01T09:30:00`);
+                            d.setMinutes(d.getMinutes() + Number(permissionMinutesInput));
+                            return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+                          })()}
+                        </strong> (09:30 AM + {permissionMinutesInput}m permission, grace does not apply)
+                      </p>
                     ) : (
-                      <span>Assigned closing time: <strong>{assignedCheckoutInput === '18:45' ? '06:45 PM (Designated Shift)' : '07:30 PM (Standard)'}</strong> (No early permission)</span>
+                      <p className="text-[10px] text-slate-500 mt-1">
+                        Cutoff: <strong>09:40 AM</strong> (09:30 AM + 10m grace). Late calculated from 09:40 AM.
+                      </p>
                     )}
-                  </p>
+                  </div>
+
+                  <div className="flex justify-end pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setFineModalTab('evening')}
+                      className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 cursor-pointer"
+                    >
+                      <span>Check Evening Departure →</span>
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
+
+              {/* Tab 2 Content: Evening Departure & Early Exit */}
+              {fineModalTab === 'evening' && (
+                <div className="rounded-xl border border-indigo-200 bg-indigo-50/30 p-3.5 space-y-3 animate-in fade-in duration-150">
+                  <div className="flex items-center justify-between border-b border-indigo-100 pb-2">
+                    <span className="font-bold text-indigo-950 flex items-center gap-1.5">
+                      <Moon className="h-4 w-4 text-indigo-600" />
+                      Evening Departure & Early Exit
+                    </span>
+                    <span className="text-[10px] text-indigo-700 font-medium">Configured Individually</span>
+                  </div>
+
+                  {/* Assigned Closing Time Switcher */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="font-semibold text-slate-800 text-[11px]">Assigned Office Closing</label>
+                      <span className="text-[10px] text-indigo-700">Per-employee schedule</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => handleAssignedCheckoutChange('19:30')}
+                        className={`flex-1 py-1 px-2 rounded-md text-[11px] font-semibold border cursor-pointer transition-colors ${
+                          assignedCheckoutInput === '19:30'
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        07:30 PM (Regular)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleAssignedCheckoutChange('18:45')}
+                        className={`flex-1 py-1 px-2 rounded-md text-[11px] font-semibold border cursor-pointer transition-colors ${
+                          assignedCheckoutInput === '18:45'
+                            ? 'bg-purple-600 text-white border-purple-600 shadow-2xs'
+                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        06:45 PM (Designated)
+                      </button>
+                      <input
+                        type="time"
+                        value={assignedCheckoutInput}
+                        onChange={(e) => handleAssignedCheckoutChange(e.target.value)}
+                        className="w-20 rounded-md border border-indigo-200 bg-white px-1.5 py-1 text-xs font-mono font-semibold text-slate-900 focus:outline-none focus:border-indigo-500"
+                        title="Custom shift closing time"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Punch Out & Early Exit Display */}
+                  <div className="grid grid-cols-2 gap-2 bg-white rounded-lg p-2.5 border border-indigo-100">
+                    <div>
+                      <span className="text-[10px] text-slate-500 block">Actual Check-OUT</span>
+                      <span className="font-mono font-bold text-slate-800 text-[13px]">
+                        {selectedFineRecord.last_out ? formatTimeOnly(selectedFineRecord.last_out) : 'Not Punched'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-500 block">Early Exit Duration</span>
+                      {(() => {
+                        if (!selectedFineRecord.last_out) {
+                          return <span className="font-mono font-medium text-slate-400">0 mins (No Punch)</span>;
+                        }
+                        const earlyInfo = computeEarlyExit(selectedFineRecord.last_out, assignedCheckoutInput, earlyPermissionMinutesInput);
+                        if (!earlyInfo.isEarly || earlyInfo.earlyMinutes === 0) {
+                          return <span className="font-mono font-bold text-emerald-700">0m (On Time / Permitted)</span>;
+                        }
+                        return (
+                          <span className="font-mono font-bold text-rose-700">
+                            {formatMinutesToHM(earlyInfo.earlyMinutes)} early
+                          </span>
+                        );
+                      })()}
+                    </div>
+                  </div>
+
+                  {/* Early Permission Offset */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="font-semibold text-indigo-950 text-[11px]">Early Exit Permission</label>
+                      <span className="text-[10px] text-indigo-700">Allowed departure adjustment</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="number"
+                        min="0"
+                        max="240"
+                        step="15"
+                        value={earlyPermissionMinutesInput}
+                        onChange={(e) => handleEarlyPermissionChange(e.target.value)}
+                        placeholder="0"
+                        className="w-20 rounded-md border border-indigo-300 bg-white px-2 py-1 text-xs font-mono font-semibold text-slate-900 focus:outline-none focus:border-indigo-500"
+                      />
+                      <div className="flex flex-wrap gap-1">
+                        {[
+                          { label: 'None', mins: 0 },
+                          { label: '+15m', mins: 15 },
+                          { label: '+30m', mins: 30 },
+                          { label: '+45m', mins: 45 },
+                          { label: '+1h', mins: 60 },
+                          { label: '+2h', mins: 120 },
+                        ].map((chip) => (
+                          <button
+                            key={chip.mins}
+                            type="button"
+                            onClick={() => handleEarlyPermissionChange(String(chip.mins))}
+                            className={`px-1.5 py-1 rounded text-[10px] font-semibold border cursor-pointer transition-colors ${
+                              Number(earlyPermissionMinutesInput) === chip.mins
+                                ? 'bg-indigo-600 border-indigo-600 text-white'
+                                : 'bg-white border-indigo-200 text-indigo-800 hover:bg-indigo-50'
+                            }`}
+                          >
+                            {chip.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-indigo-900 font-medium mt-1">
+                      {Number(earlyPermissionMinutesInput) > 0 ? (
+                        <span>
+                          Allowed exit from <strong>{computeEarlyExit(selectedFineRecord.last_out || new Date(), assignedCheckoutInput, earlyPermissionMinutesInput).allowedExitStr}</strong> (06:30 PM office closing minus {earlyPermissionMinutesInput}m permission)
+                        </span>
+                      ) : (
+                        <span>Assigned closing time: <strong>{assignedCheckoutInput === '18:45' ? '06:45 PM (Designated Shift)' : '07:30 PM (Standard)'}</strong> (No early permission)</span>
+                      )}
+                    </p>
+                  </div>
+
+                  <div className="flex justify-start pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setFineModalTab('morning')}
+                      className="text-[11px] font-semibold text-teal-600 hover:text-teal-800 flex items-center gap-1 cursor-pointer"
+                    >
+                      <span>← Check Morning Check-In</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Assessment Summary & Fine Action */}

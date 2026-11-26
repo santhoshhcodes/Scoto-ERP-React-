@@ -132,9 +132,14 @@ export const RecordPaymentPage = () => {
           (inv) => inv.trans_no === urlDocNo || inv.invoice_no === urlDocNo
         );
         if (found) {
+          const isPaid = found.payment_status === 'PAID' || (found.balance_due !== undefined && Number(found.balance_due) <= 0.01);
+          if (isPaid) {
+            setValidationError(`Invoice ${found.trans_no || found.invoice_no} is already fully paid (₹0.00 balance due). It cannot be selected for payment.`);
+            return;
+          }
           setSelectedDoc(found);
           setReceiptType('Invoice Settlement');
-          setGrossAmount(urlAmount || String(found.balance_due || found.total_amount || ''));
+          setGrossAmount(urlAmount || String(found.balance_due > 0 ? found.balance_due : ''));
           setRemarks(`Payment received for invoice ${found.trans_no}`);
         }
       } else if (urlDocType === 'PROFORMA' || urlDocType === 'QUOTATION') {
@@ -142,9 +147,14 @@ export const RecordPaymentPage = () => {
         const foundQ = openDocs?.quotations?.find((q) => q.trans_no === urlDocNo);
         const found = foundPf || foundQ;
         if (found) {
+          const isPaid = found.balance_pending !== undefined && Number(found.balance_pending) <= 0.01;
+          if (isPaid) {
+            setValidationError(`Document ${found.trans_no} is already fully paid (₹0.00 balance due). It cannot be selected for payment.`);
+            return;
+          }
           setSelectedDoc(found);
           setReceiptType('Advance against Quotation / Proforma');
-          setGrossAmount(urlAmount || String(found.balance_pending || found.total_amount || ''));
+          setGrossAmount(urlAmount || String(found.balance_pending > 0 ? found.balance_pending : ''));
           setRemarks(`Advance payment for ${found.trans_no}`);
         }
       }
@@ -190,16 +200,25 @@ export const RecordPaymentPage = () => {
 
   // Document Selection Handler
   const handleSelectDoc = (doc) => {
+    const isPaid = doc.payment_status === 'PAID' ||
+      (doc.doc_type === 'SALES_INVOICE' && doc.balance_due !== undefined && Number(doc.balance_due) <= 0.01) ||
+      (doc.doc_type !== 'SALES_INVOICE' && doc.balance_pending !== undefined && Number(doc.balance_pending) <= 0.01);
+
+    if (isPaid) {
+      setValidationError(`Document ${doc.trans_no || doc.invoice_no} is already fully paid (₹0.00 balance due). It cannot be selected for payment.`);
+      return;
+    }
+
     setSelectedDoc(doc);
     setValidationError('');
     setFieldErrors((prev) => ({ ...prev, grossAmount: false }));
     if (doc.doc_type === 'SALES_INVOICE') {
-      const due = doc.balance_due !== undefined ? doc.balance_due : doc.total_amount;
-      setGrossAmount(String(due > 0 ? due : doc.total_amount));
+      const due = doc.balance_due !== undefined ? Number(doc.balance_due) : Number(doc.total_amount);
+      setGrossAmount(String(due > 0 ? due : ''));
       setRemarks(`Payment received for sales invoice ${doc.trans_no || doc.invoice_no}`);
     } else {
-      const pending = doc.balance_pending !== undefined ? doc.balance_pending : doc.total_amount;
-      setGrossAmount(String(pending > 0 ? pending : doc.total_amount));
+      const pending = doc.balance_pending !== undefined ? Number(doc.balance_pending) : Number(doc.total_amount);
+      setGrossAmount(String(pending > 0 ? pending : ''));
       setRemarks(`Advance payment for ${doc.trans_no || doc.doc_type}`);
     }
   };
@@ -221,18 +240,30 @@ export const RecordPaymentPage = () => {
     const gross = parseFloat(grossAmount) || 0;
     const tds = parseFloat(tdsAmount) || 0;
 
-    if (gross > 0 && selectedDoc) {
+    if (selectedDoc) {
       if (selectedDoc.doc_type === 'SALES_INVOICE') {
-        const balDue = selectedDoc.balance_due !== undefined ? selectedDoc.balance_due : selectedDoc.total_amount;
-        if (balDue > 0 && gross > (balDue + 0.5)) {
+        const balDue = selectedDoc.balance_due !== undefined ? Number(selectedDoc.balance_due) : Number(selectedDoc.total_amount);
+        if (balDue <= 0.01 || selectedDoc.payment_status === 'PAID') {
+          setValidationError(
+            `Invoice ${selectedDoc.trans_no || selectedDoc.invoice_no} is already fully paid (₹0.00 balance due). Please select an unpaid invoice.`
+          );
+          return;
+        }
+        if (gross > 0 && gross > (balDue + 0.05)) {
           setValidationError(
             `Allocated amount (₹${gross.toLocaleString('en-IN')}) exceeds the invoice balance due (₹${balDue.toLocaleString('en-IN')}). Please adjust the amount.`
           );
           return;
         }
       } else if (selectedDoc.doc_type === 'PROFORMA' || selectedDoc.doc_type === 'QUOTATION') {
-        const balPending = selectedDoc.balance_pending !== undefined ? selectedDoc.balance_pending : selectedDoc.total_amount;
-        if (balPending > 0 && gross > (balPending + 0.5)) {
+        const balPending = selectedDoc.balance_pending !== undefined ? Number(selectedDoc.balance_pending) : Number(selectedDoc.total_amount);
+        if (balPending <= 0.01) {
+          setValidationError(
+            `Document ${selectedDoc.trans_no} is already fully paid (₹0.00 balance due).`
+          );
+          return;
+        }
+        if (gross > 0 && gross > (balPending + 0.05)) {
           setValidationError(
             `Advance amount (₹${gross.toLocaleString('en-IN')}) exceeds the remaining balance pending (₹${balPending.toLocaleString('en-IN')}).`
           );
@@ -277,6 +308,24 @@ export const RecordPaymentPage = () => {
     if (!receiptDate) {
       errors.push('Payment / Receipt Date is required.');
       newFieldErrors.receiptDate = true;
+    }
+
+    if (selectedDoc) {
+      const isPaid = selectedDoc.payment_status === 'PAID' ||
+        (selectedDoc.doc_type === 'SALES_INVOICE' && selectedDoc.balance_due !== undefined && Number(selectedDoc.balance_due) <= 0.01) ||
+        (selectedDoc.doc_type !== 'SALES_INVOICE' && selectedDoc.balance_pending !== undefined && Number(selectedDoc.balance_pending) <= 0.01);
+      if (isPaid) {
+        errors.push(`Document ${selectedDoc.trans_no || selectedDoc.invoice_no} is already fully paid. Duplicate receipts are not allowed.`);
+        newFieldErrors.grossAmount = true;
+      } else {
+        const balDue = selectedDoc.doc_type === 'SALES_INVOICE'
+          ? (selectedDoc.balance_due !== undefined ? Number(selectedDoc.balance_due) : Number(selectedDoc.total_amount))
+          : (selectedDoc.balance_pending !== undefined ? Number(selectedDoc.balance_pending) : Number(selectedDoc.total_amount));
+        if (gross > (balDue + 0.05)) {
+          errors.push(`Gross settlement amount (₹${gross.toLocaleString('en-IN')}) cannot exceed the balance due (₹${balDue.toLocaleString('en-IN')}).`);
+          newFieldErrors.grossAmount = true;
+        }
+      }
     }
 
     if (validationError) {
@@ -877,23 +926,32 @@ export const RecordPaymentPage = () => {
                         <tbody className="divide-y divide-slate-100 bg-white">
                           {openDocs?.invoices && openDocs.invoices.length > 0 ? (
                             openDocs.invoices.map((inv) => {
+                              const isPaid = inv.payment_status === 'PAID' || (inv.balance_due !== undefined && Number(inv.balance_due) <= 0.01);
                               const isSelected =
+                                !isPaid &&
                                 selectedDoc &&
                                 (selectedDoc.trans_no === inv.trans_no || selectedDoc.invoice_no === inv.invoice_no);
                               return (
                                 <tr
                                   key={inv.trans_no || inv.invoice_no}
-                                  onClick={() => handleSelectDoc(inv)}
-                                  className={`hover:bg-emerald-50/50 cursor-pointer transition-colors ${isSelected ? 'bg-emerald-50 font-medium' : ''
-                                    }`}
+                                  onClick={() => !isPaid && handleSelectDoc(inv)}
+                                  className={`transition-colors ${
+                                    isPaid
+                                      ? 'opacity-60 bg-slate-50 cursor-not-allowed select-none'
+                                      : isSelected
+                                      ? 'bg-emerald-50 font-medium cursor-pointer'
+                                      : 'hover:bg-emerald-50/50 cursor-pointer'
+                                  }`}
+                                  title={isPaid ? 'This invoice is already fully paid' : ''}
                                 >
                                   <td className="p-3 text-center">
                                     <input
                                       type="radio"
                                       name="selected_invoice"
+                                      disabled={isPaid}
                                       checked={Boolean(isSelected)}
-                                      onChange={() => handleSelectDoc(inv)}
-                                      className="w-4 h-4 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                                      onChange={() => !isPaid && handleSelectDoc(inv)}
+                                      className="w-4 h-4 text-emerald-600 focus:ring-emerald-500 cursor-pointer disabled:cursor-not-allowed"
                                     />
                                   </td>
                                   <td className="p-3 font-bold text-slate-900">{inv.trans_no}</td>
@@ -912,14 +970,15 @@ export const RecordPaymentPage = () => {
                                   </td>
                                   <td className="p-3 text-center">
                                     <span
-                                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${inv.payment_status === 'PAID'
-                                        ? 'bg-emerald-100 text-emerald-800'
-                                        : inv.payment_status === 'PARTIAL'
+                                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                        isPaid || inv.payment_status === 'PAID'
+                                          ? 'bg-emerald-100 text-emerald-800'
+                                          : inv.payment_status === 'PARTIAL'
                                           ? 'bg-amber-100 text-amber-800'
                                           : 'bg-rose-100 text-rose-800'
-                                        }`}
+                                      }`}
                                     >
-                                      {inv.payment_status}
+                                      {isPaid ? 'PAID' : inv.payment_status}
                                     </span>
                                   </td>
                                 </tr>

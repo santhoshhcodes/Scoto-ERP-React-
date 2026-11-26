@@ -40,23 +40,46 @@ export const customerReportApi = {
    * Fetch complete 360 financial dossier for a customer
    * GET /api/v1/transaction/customer-report/dossier/:clientCode?fin_year=...
    */
-  getDossier: async (clientCode, finYear = 'ALL') => {
+  getDossier: async (
+    clientCode,
+    finYear = 'ALL',
+    fromMonth = null,
+    toMonth = null,
+    fromDate = null,
+    toDate = null
+  ) => {
     if (!clientCode) return null;
     const url = API_ENDPOINTS.TRANSACTION.CUSTOMER_REPORT_DOSSIER(clientCode);
-    return await apiClient.get(url, {
-      params: { fin_year: finYear || 'ALL' },
-    });
+    const params = { fin_year: finYear || 'ALL' };
+    if (fromMonth) params.from_month = fromMonth;
+    if (toMonth) params.to_month = toMonth;
+    if (fromDate) params.from_date = fromDate;
+    if (toDate) params.to_date = toDate;
+    return await apiClient.get(url, { params });
   },
 
   /**
    * Download Executive Customer Report & Ledger Dossier Excel (.xlsx) from backend
    * GET /api/v1/transaction/customer-report/export-excel/:clientCode?fin_year=...
    */
-  downloadCustomerReportExcel: async (clientCode, finYear = 'ALL', tab = 'ALL') => {
+  downloadCustomerReportExcel: async (
+    clientCode,
+    finYear = 'ALL',
+    tab = 'ALL',
+    fromMonth = null,
+    toMonth = null,
+    fromDate = null,
+    toDate = null
+  ) => {
     if (!clientCode) return;
     const url = API_ENDPOINTS.TRANSACTION.CUSTOMER_REPORT_EXPORT_EXCEL(clientCode);
+    const params = { fin_year: finYear || 'ALL', tab };
+    if (fromMonth) params.from_month = fromMonth;
+    if (toMonth) params.to_month = toMonth;
+    if (fromDate) params.from_date = fromDate;
+    if (toDate) params.to_date = toDate;
     const response = await apiClient.get(url, {
-      params: { fin_year: finYear || 'ALL', tab },
+      params,
       responseType: 'blob',
     });
     const blob =
@@ -70,7 +93,11 @@ export const customerReportApi = {
     link.href = downloadUrl;
     const safeCode = String(clientCode).replace(/[\/\\]/g, '_').trim();
     const safeFy = String(finYear || 'ALL').replace(/[\/\\]/g, '_').trim();
-    link.setAttribute('download', `Customer_Dossier_${safeCode}_${safeFy}.xlsx`);
+    const monthSuffix =
+      fromMonth && toMonth
+        ? `_${String(fromMonth).replace(/[-/]/g, '')}_to_${String(toMonth).replace(/[-/]/g, '')}`
+        : '';
+    link.setAttribute('download', `Customer_Dossier_${safeCode}_${safeFy}${monthSuffix}.xlsx`);
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -114,10 +141,18 @@ export const useCustomerPortfolioSummary = (finYear = 'ALL') => {
 /**
  * React Query Hook: Customer 360 Dossier
  */
-export const useCustomerDossier = (clientCode, finYear = 'ALL') => {
+export const useCustomerDossier = (
+  clientCode,
+  finYear = 'ALL',
+  fromMonth = null,
+  toMonth = null,
+  fromDate = null,
+  toDate = null
+) => {
   return useQuery({
-    queryKey: ['customer-report', 'dossier', clientCode, finYear],
-    queryFn: () => customerReportApi.getDossier(clientCode, finYear),
+    queryKey: ['customer-report', 'dossier', clientCode, finYear, fromMonth, toMonth, fromDate, toDate],
+    queryFn: () =>
+      customerReportApi.getDossier(clientCode, finYear, fromMonth, toMonth, fromDate, toDate),
     enabled: Boolean(clientCode),
     staleTime: 1000 * 60 * 2, // 2 mins
   });
@@ -128,8 +163,24 @@ export const useCustomerDossier = (clientCode, finYear = 'ALL') => {
  */
 export const useDownloadCustomerReportExcel = () => {
   return useMutation({
-    mutationFn: ({ clientCode, finYear = 'ALL', tab = 'ALL' }) =>
-      customerReportApi.downloadCustomerReportExcel(clientCode, finYear, tab),
+    mutationFn: ({
+      clientCode,
+      finYear = 'ALL',
+      tab = 'ALL',
+      fromMonth = null,
+      toMonth = null,
+      fromDate = null,
+      toDate = null,
+    }) =>
+      customerReportApi.downloadCustomerReportExcel(
+        clientCode,
+        finYear,
+        tab,
+        fromMonth,
+        toMonth,
+        fromDate,
+        toDate
+      ),
   });
 };
 

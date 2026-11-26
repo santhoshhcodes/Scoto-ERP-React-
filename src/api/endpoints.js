@@ -58,18 +58,24 @@ export const API_ENDPOINTS = {
 
   TRANSACTION: {
     QUOTATIONS: '/transaction/quotations',
+    QUOTATION_NEXT_NO: '/transaction/quotations/next-trans-no',
+    QUOTATION_CHECK_NO: '/transaction/quotations/check-trans-no',
     QUOTATION_BY_NO: (transNo) => `/transaction/quotations/${encodeURIComponent(transNo)}`,
     QUOTATION_REVISE: (transNo) => `/transaction/quotations/${encodeURIComponent(transNo)}/revise`,
     QUOTATION_REVISIONS: (transNo) => `/transaction/quotations/${encodeURIComponent(transNo)}/revisions`,
     QUOTATION_EXPORT_EXCEL: (transNo) => `/transaction/quotations/${encodeURIComponent(transNo)}/export-excel`,
 
     PROFORMA_INVOICES: '/transaction/proforma-invoices',
+    PROFORMA_INVOICE_NEXT_NO: '/transaction/proforma-invoices/next-trans-no',
+    PROFORMA_INVOICE_CHECK_NO: '/transaction/proforma-invoices/check-trans-no',
     PROFORMA_INVOICE_BY_NO: (transNo) => `/transaction/proforma-invoices/${encodeURIComponent(transNo)}`,
     PROFORMA_INVOICE_EXPORT_EXCEL: (transNo) => `/transaction/proforma-invoices/${encodeURIComponent(transNo)}/export-excel`,
 
     DELIVERY_CHALLANS: '/transaction/delivery-challans',
     DELIVERY_CHALLAN_BY_NO: (deliveryNo) => `/transaction/delivery-challans/${encodeURIComponent(deliveryNo)}`,
     SALES_INVOICES: '/transaction/sales-invoices',
+    SALES_INVOICE_NEXT_NO: '/transaction/sales-invoices/next-trans-no',
+    SALES_INVOICE_CHECK_NO: '/transaction/sales-invoices/check-trans-no',
     SALES_INVOICE_BY_NO: (transNo) => `/transaction/sales-invoices/${encodeURIComponent(transNo)}`,
     SALES_INVOICE_EXPORT_EXCEL: (transNo) => `/transaction/sales-invoices/${encodeURIComponent(transNo)}/export-excel`,
     SALES_INVOICE_APPROVAL: (transNo) => `/transaction/sales-invoices/${encodeURIComponent(transNo)}/approval`,
